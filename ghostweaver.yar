@@ -1,8 +1,19 @@
 /*
     GhostWeaver / Pantera RAT YARA Rules
-    Author: derp.ca
+    Author: derp.ca (ectkirk)
     Date: 2026-03-08
     Reference: https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat
+
+    Covers:
+      1. GhostWeaver obfuscated PS1 RAT (builder output, on-disk)
+      2. GhostWeaver decoded PS1 RAT (post-deobfuscation / memory)
+      3. GhostWeaver persistence installer (C2-delivered IEX payload)
+      4. GhostWeaver pinned TLS certificate
+      5. MintsLoader victim profiler (TAG-124 scoring stage)
+      6. MintsLoader JS dropper (TAG-124 stage-1)
+
+    Tested against 5 known GhostWeaver PS1 builds, 1 PE32 packer,
+    1 persistence installer, and 2 MintsLoader samples.
 */
 
 rule GhostWeaver_PS1_Obfuscated
@@ -22,13 +33,19 @@ rule GhostWeaver_PS1_Obfuscated
         malware = "GHOSTWEAVER"
         mitre_att = "T1059.001"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "GhostWeaver/Pantera RAT obfuscated PowerShell builder output detected."
 
     strings:
         $builder_stamp = /\$global:keystr=streams\\[0-9]{3}\\stub\\[0-9]{8,15}/ ascii wide
+
         $arith_decoder1 = "[system.String]::new(@((" ascii wide nocase
         $arith_decoder2 = "[char[]]@((" ascii wide nocase
-        $arith_pattern = /\(\d{3,8}[\-\+\/\*]\(?\-?\d{3,8}[\-\+\/\*]\d{3,8}\)?\)/ ascii wide
+
+        $arith_sep = "),(" ascii wide
+
         $exec_ctx = "$executioncontext" ascii wide nocase
+
         $join_op = "-join ''" ascii wide
 
     condition:
@@ -37,7 +54,7 @@ rule GhostWeaver_PS1_Obfuscated
             $builder_stamp
             or (
                 ($arith_decoder1 or $arith_decoder2)
-                and #arith_pattern > 500
+                and #arith_sep > 500
                 and $exec_ctx
                 and $join_op
             )
@@ -61,6 +78,8 @@ rule GhostWeaver_PS1_Decoded
         malware = "GHOSTWEAVER"
         mitre_att = "T1059.001"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "GhostWeaver/Pantera RAT decoded PowerShell payload detected."
 
     strings:
         $proto_ssl = "SslStream" ascii wide nocase
@@ -70,7 +89,6 @@ rule GhostWeaver_PS1_Decoded
         $proto_sslproto = "SslProtocols" ascii wide nocase
 
         $beacon = "'ClientInfo'" ascii wide
-
         $cmd_iex = "'iex'" ascii wide
         $cmd_plugin = "'plugin'" ascii wide
         $cmd_selfdelete = "'selfdelete'" ascii wide
@@ -78,6 +96,7 @@ rule GhostWeaver_PS1_Decoded
         $cmd_sendplugin = "'sendPlugin'" ascii wide
 
         $mutex = "euzizvuze" ascii wide
+
         $port = "25658" ascii wide
 
         $dga_random = "System.Random" ascii wide nocase
@@ -115,6 +134,8 @@ rule GhostWeaver_Persistence_Installer
         malware = "GHOSTWEAVER"
         mitre_att = "T1548.002"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "GhostWeaver/Pantera persistence installer with UAC bypass detected."
 
     strings:
         $uac_guid = "A6BFEA43-501F-456F-A845-983D3AD7B8F0" ascii wide nocase
@@ -122,15 +143,12 @@ rule GhostWeaver_Persistence_Installer
         $uac_elevation = "Elevation:Administrator!new:" ascii wide
 
         $peb_func = "Masquerade-PEB" ascii wide
-
         $headless = "--headless powershell" ascii wide
         $headless_cmd = "--headless cmd" ascii wide
 
         $schtask_interval = "PT3M" ascii wide
         $schtask_desc = "Maintenance task" ascii wide
-
         $dpapi = "DataProtectionScope" ascii wide nocase
-
         $azure_prefix = /Azure[A-Za-z]+\.(ps1|log|jpg)/ ascii wide
 
     condition:
@@ -160,16 +178,21 @@ rule GhostWeaver_TLS_Certificate
         malware = "GHOSTWEAVER"
         mitre_att = "T1553.004"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "GhostWeaver/Pantera pinned TLS certificate detected."
 
     strings:
         $cert_der = {
-            30 82 04 ee 30 82 02 d6
-            a0 03 02 01 02 02 10 00
-            9e d7 a1 52 31 31 20 57
-            1a 4e 51 63 87 70 69 30
+            30 82 04 ee 30 82 02 d6  // SEQUENCE headers
+            a0 03 02 01 02 02 10 00  // version + serial prefix
+            9e d7 a1 52 31 31 20 57  // serial number (unique)
+            1a 4e 51 63 87 70 69 30  // serial + algo prefix
         }
+
         $cert_b64 = "MIIE7jCCAtagAwIBAgIQAJ7XoVIxMSBXGk5RY4dwa" ascii wide
+
         $cert_cn_str = "GeoTrust LTD." ascii wide
+
         $cert_sha1 = { 00 6f 5b b9 27 20 ac a3 3a ab 33 50 5e 17 c4 2c c2 f9 f2 36 }
 
     condition:
@@ -193,6 +216,8 @@ rule MintsLoader_Victim_Profiler
         malware = "MINTSLOADER"
         mitre_att = "T1497.001"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "MintsLoader/TAG-124 sandbox scoring and victim profiling detected."
 
     strings:
         $check_vm = "IsVirtualMachine" ascii wide nocase
@@ -233,11 +258,13 @@ rule MintsLoader_JS_Dropper
         malware = "MINTSLOADER"
         mitre_att = "T1059.007"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "MintsLoader/TAG-124 XOR-obfuscated JavaScript dropper detected."
 
     strings:
         $cc_on = "//@cc_on" ascii
-        $obf_func = /a0_0x[0-9a-fA-F]{3,8}/ ascii
 
+        $obf_func = /a0_0x[0-9a-fA-F]{3,8}/ ascii
         $str_mlhttp = "MLHTT" ascii
         $str_activex = "eXObj" ascii
         $str_wsh = "'WSH'" ascii
@@ -276,6 +303,8 @@ rule GhostWeaver_Network_Indicators
         malware = "GHOSTWEAVER"
         mitre_att = "T1568.002"
         reference = "https://www.derp.ca/blog/ghostweaver-tag124-powershell-rat"
+        triage_score = 10
+        triage_description = "GhostWeaver/Pantera C2 beacon or command traffic detected."
 
     strings:
         $json_clientinfo = /\"Packet\":\s?\"ClientInfo\"/ ascii nocase
