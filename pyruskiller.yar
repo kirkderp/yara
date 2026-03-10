@@ -5,13 +5,18 @@
     Source: https://github.com/kirkderp/yara
 
     Covers:
-      1. PyrusKiller PyInstaller PE (packed executable — both indir.exe and PyrusTakeover.exe)
+      1. PyrusKiller PyInstaller PE (packed executable)
       2. PyrusKiller pyc bytecode (extracted/decompressed entry point)
-      3. PyrusKiller ransom note (dropped READ_ME.txt)
 
-    Tested against 2 known builds:
-      - indir.exe       ef6ce8474dabd35ed894906952f33468f8d75c13ff0ef21f45051b17548afade
-      - PyrusTakeover   1789db040b699d2fb948cdd05d363a63c21fe6a49a959ca86f72b4b3809569ca
+    Tested against 8 known builds (7 unique pyc bytecodes):
+      - PyrusKiller.exe    d2b9373235cc063fd66c625e076b7383cde651451b13215c9abbbe8e6ba08ae5
+      - PyrusKillerv2.exe  5e5fd5188d2114ce4ac1231d5555cb9e1cda201f93c7b94622d9e445456b0932
+      - PyrusKillerv2.exe  21cd27d442611507296b284bb474218212136c3e7c4c5f3daef4fc68887fa481
+      - PyrusTakeover.exe  2e69e88652b003e34768a04633e31b5588eb0a250cf75b07bcd629e550fc711d
+      - PyrusTakeover.exe  b240d207d6ac526a97ce809433e0300b2bac78b527301e38605d3e215bfb140c
+      - PyrusTakeover.exe  b156c0cfc9d67aa6907d4f5dbed19c3c6973ed038bfd68c358f60043571ecb59
+      - PyrusTakeover.exe  1789db040b699d2fb948cdd05d363a63c21fe6a49a959ca86f72b4b3809569ca
+      - indir.exe          ef6ce8474dabd35ed894906952f33468f8d75c13ff0ef21f45051b17548afade
 */
 
 rule PyrusKiller_PE
@@ -19,7 +24,7 @@ rule PyrusKiller_PE
     meta:
         id = "owlyO1OFyQfF3bstJOcyE5"
         fingerprint = "122085f6d3f1e135f6f3a8ea6a6a502a939e7a3035196b2acf495f8108af2e85"
-        version = "1.0"
+        version = "1.1"
         date = "2026-03-10"
         modified = "2026-03-10"
         status = "RELEASED"
@@ -59,7 +64,7 @@ rule PyrusKiller_PYC
     meta:
         id = "agBkPsHZGTnyvO6ZJBIwtL"
         fingerprint = "556774bff7f5d44565073a658baaa5b935f203aa50755bd4d69b58788abbb547"
-        version = "1.0"
+        version = "1.1"
         date = "2026-03-10"
         modified = "2026-03-10"
         status = "RELEASED"
@@ -116,37 +121,7 @@ rule PyrusKiller_PYC
             filesize < 100KB
             and $reg_path
             and $func_slay
-            and $ransom_text
-            and ($persist_dir or $persist_runkey or $pass_pyrus or $source_name)
+            and ($persist_dir or $persist_runkey)
+            and ($ext_pyrus or $wallpaper or $source_name)
         )
-}
-
-rule PyrusKiller_RansomNote
-{
-    meta:
-        id = "GC459pEIFcew69zrJtvPFh"
-        fingerprint = "244ba405a92207c059c07b50c7fd366732ee4ee68d29405563d4bf5d8bcaaff1"
-        version = "1.0"
-        date = "2026-03-10"
-        modified = "2026-03-10"
-        status = "RELEASED"
-        sharing = "TLP:CLEAR"
-        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
-        author = "kirkderp"
-        description = "PyrusKiller ransomware ransom note (READ_ME.txt)"
-        category = "MALWARE"
-        malware = "PYRUSKILLER"
-        mitre_att = "T1491.001"
-        reference = "https://github.com/kirkderp/yara"
-        triage_score = 8
-        triage_description = "PyrusKiller ransomware ransom note detected."
-
-    strings:
-        $note = "STATUS: SLAYED BY PYRUS." ascii wide
-        $login = "Use 'pyrus' to log in" ascii wide
-
-    condition:
-        filesize < 1KB
-        and $note
-        and $login
 }
