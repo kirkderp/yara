@@ -2,11 +2,11 @@
     KarstoRAT YARA Rules
     Author: derp.ca (ectkirk)
     Date: 2026-03-10
-    Reference: (TBD — blog post pending)
+    Reference: (TBD - blog post pending)
 
     Covers:
-      1. KarstoRAT PE — all builds (generic detection)
-      2. KarstoRAT Build 4 — anti-analysis + PLAY_SOUND variant
+      1. KarstoRAT PE - all builds (generic detection)
+      2. KarstoRAT Build 4 - anti-analysis + PLAY_SOUND variant
       3. KarstoRAT C2 protocol (network/memory)
       4. KarstoRAT token stealer strings (Builds 2+)
 
@@ -20,26 +20,26 @@
 rule KarstoRAT_PE
 {
     meta:
-        id = "cce9c562cc7dfca7b87fb358"
+        id = "aZQQAm3QfB2IR1UHD3PBUZ"
         fingerprint = "cce9c562cc7dfca7b87fb3588dc0748ed210f50074e7f37551485aea39344065"
         version = "1.0"
         date = "2026-03-10"
         modified = "2026-03-10"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
-        source = "HTTPS://WWW.DERP.CA"
+        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
         author = "derp.ca"
-        description = "KarstoRAT native C++ RAT — all builds (author hibby, MSVC x64)"
+        description = "KarstoRAT native C++ RAT - all builds (author hibby, MSVC x64)"
         category = "MALWARE"
         malware = "KARSTORAT"
         malware_type = "RAT"
         mitre_att = "T1219"
-        reference = "https://www.derp.ca"
+        reference = "https://github.com/kirkderp/yara"
         triage_score = 10
         triage_description = "KarstoRAT remote access trojan detected."
 
     strings:
-        // PDB path — author "hibby", nested Project1 directories
+        // PDB path - author "hibby", nested Project1 directories
         $pdb = "\\Users\\hibby\\Desktop\\Project1\\" ascii
 
         // User-Agent used for all WinINet C2 comms
@@ -107,21 +107,21 @@ rule KarstoRAT_PE
 rule KarstoRAT_Build4
 {
     meta:
-        id = "fb73b7c5bceb90ea14b834a5"
+        id = "wkmOHSBtmAzawl95rZjcmX"
         fingerprint = "fb73b7c5bceb90ea14b834a50a62cfe97a29e100fc1c2e03a935e96bb9f855ac"
         version = "1.0"
         date = "2026-03-10"
         modified = "2026-03-10"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
-        source = "HTTPS://WWW.DERP.CA"
+        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
         author = "derp.ca"
-        description = "KarstoRAT Build 4 variant — anti-analysis, PLAY_SOUND, upload endpoint bug"
+        description = "KarstoRAT Build 4 variant - anti-analysis, PLAY_SOUND, upload endpoint bug"
         category = "MALWARE"
         malware = "KARSTORAT"
         malware_type = "RAT"
         mitre_att = "T1497.001"
-        reference = "https://www.derp.ca"
+        reference = "https://github.com/kirkderp/yara"
         triage_score = 10
         triage_description = "KarstoRAT Build 4 with anti-analysis and PLAY_SOUND command detected."
 
@@ -144,7 +144,7 @@ rule KarstoRAT_Build4
         $cmd_playsound = "PLAY_SOUND:" ascii wide
         $alarm_file = "alarm.wav" ascii wide
 
-        // Upload endpoint bug — & instead of ? (Build 4 regression)
+        // Upload endpoint bug - & instead of ? (Build 4 regression)
         $upload_bug = "/client-upload&filename=" ascii
 
         // Build 4 simplified response format (no "Action: [" prefix on some)
@@ -174,21 +174,21 @@ rule KarstoRAT_Build4
 rule KarstoRAT_Token_Stealer
 {
     meta:
-        id = "b792b7e5820dfc96972a08b7"
+        id = "eNE3ujpchWIRzIwa8ch7D5"
         fingerprint = "b792b7e5820dfc96972a08b70820e4adca5fa6265ef310072d0476aba4be1fa9"
         version = "1.0"
         date = "2026-03-10"
         modified = "2026-03-10"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
-        source = "HTTPS://WWW.DERP.CA"
+        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
         author = "derp.ca"
-        description = "KarstoRAT token stealer component — Discord + browser credential theft (Builds 2+)"
+        description = "KarstoRAT token stealer component - Discord + browser credential theft (Builds 2+)"
         category = "MALWARE"
         malware = "KARSTORAT"
-        malware_type = "STEALER"
+        malware_type = "INFOSTEALER"
         mitre_att = "T1528"
-        reference = "https://www.derp.ca"
+        reference = "https://github.com/kirkderp/yara"
         triage_score = 10
         triage_description = "KarstoRAT token stealer targeting Discord and browser credentials detected."
 
@@ -240,21 +240,21 @@ rule KarstoRAT_Token_Stealer
 rule KarstoRAT_Network
 {
     meta:
-        id = "3e8dd54b7d8cfe192bfedd62"
+        id = "dJKjLzlU7wSFBukw8hrcdp"
         fingerprint = "3e8dd54b7d8cfe192bfedd628c7b310fae60955d7f08d52d3693c0cded8cfcb9"
         version = "1.0"
         date = "2026-03-10"
         modified = "2026-03-10"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
-        source = "HTTPS://WWW.DERP.CA"
+        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
         author = "derp.ca"
-        description = "KarstoRAT C2 protocol indicators — PCAP, memory, or proxy logs"
+        description = "KarstoRAT C2 protocol indicators - PCAP, memory, or proxy logs"
         category = "MALWARE"
         malware = "KARSTORAT"
         malware_type = "RAT"
         mitre_att = "T1071.001"
-        reference = "https://www.derp.ca"
+        reference = "https://github.com/kirkderp/yara"
         triage_score = 10
         triage_description = "KarstoRAT C2 beacon or command traffic detected."
 
@@ -289,7 +289,7 @@ rule KarstoRAT_Network
         $ipcheck = "http://api.ipify.org" ascii
 
     condition:
-        // Not PE-only — works on PCAP, memory dumps, proxy logs
+        // Not PE-only - works on PCAP, memory dumps, proxy logs
         (
             // C2 beacon traffic
             ($ua_header and ($beacon or $log))
