@@ -6,7 +6,7 @@
 
     Covers:
       1. HellsUchecker native x64 backdoor (memory scan -- PE is never on disk)
-      2. MSI dropper (on disk -- WiX-built, 0/76 VT as of 2026-03-11)
+      2. MSI dropper (on disk -- WiX-built, 2/76 VT as of 2026-03-11)
       3. MSBuild polyglot BAT (on disk -- BAT header + MSBuild XML + base91 payload)
       4. Shellcode loader (memory -- raw shellcode as injected by Hell's Gate)
 
@@ -14,7 +14,7 @@
     in the final PE. Kill chain: ClickFix -> finger.exe LOLBin -> Python -> MSI ->
     BAT/MSBuild -> .NET EtherHiding -> Hell's Gate shellcode injection -> uchecker backdoor
 
-    Reference: TBD (blog post pending)
+    Reference: https://derp.ca/blog/hellsuchecker-clickfix-etherhiding
 */
 
 rule HellsUchecker_Backdoor
@@ -33,7 +33,7 @@ rule HellsUchecker_Backdoor
         category = "MALWARE"
         malware = "HELLSUCHECKER"
         mitre_att = "T1071.001"
-        reference = "https://github.com/kirkderp/yara"
+        reference = "https://derp.ca/blog/hellsuchecker-clickfix-etherhiding"
         triage_score = 10
         triage_description = "HellsUchecker backdoor detected in memory. Custom native x64 implant with JSON-RPC C2."
 
@@ -68,7 +68,7 @@ rule HellsUchecker_Backdoor_Wide
         category = "MALWARE"
         malware = "HELLSUCHECKER"
         mitre_att = "T1071.001"
-        reference = "https://github.com/kirkderp/yara"
+        reference = "https://derp.ca/blog/hellsuchecker-clickfix-etherhiding"
         triage_score = 10
         triage_description = "Probable HellsUchecker backdoor detected. Custom JSON-RPC C2 implant."
 
@@ -106,7 +106,7 @@ rule HellsUchecker_MSI_Dropper
         category = "MALWARE"
         malware = "HELLSUCHECKER"
         mitre_att = "T1218.007"
-        reference = "https://github.com/kirkderp/yara"
+        reference = "https://derp.ca/blog/hellsuchecker-clickfix-etherhiding"
         triage_score = 10
         triage_description = "HellsUchecker MSI dropper detected. Fake Microsoft Update installer dropping BAT/MSBuild polyglot."
 
@@ -143,7 +143,7 @@ rule HellsUchecker_MSBuild_Polyglot
         category = "MALWARE"
         malware = "HELLSUCHECKER"
         mitre_att = "T1127.001"
-        reference = "https://github.com/kirkderp/yara"
+        reference = "https://derp.ca/blog/hellsuchecker-clickfix-etherhiding"
         triage_score = 10
         triage_description = "HellsUchecker BAT/MSBuild polyglot detected. Batch script wrapping MSBuild inline C# task with base91-encoded payload."
 
@@ -181,7 +181,7 @@ rule HellsUchecker_Shellcode_Loader
         category = "MALWARE"
         malware = "HELLSUCHECKER"
         mitre_att = "T1055.012"
-        reference = "https://github.com/kirkderp/yara"
+        reference = "https://derp.ca/blog/hellsuchecker-clickfix-etherhiding"
         triage_score = 10
         triage_description = "HellsUchecker shellcode loader detected in memory. SipHash-CTR cipher + aPLib PE loader."
 
