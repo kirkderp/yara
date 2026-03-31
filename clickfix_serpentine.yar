@@ -51,8 +51,8 @@ rule Kramer_PYC_Obfuscator
         triage_description = "Kramer Python bytecode obfuscator detected."
         yarahub_uuid = "79adf976-9d41-4e2d-a2b3-0a4e340951e5"
         yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:CLEAR"
-        yarahub_rule_sharing_tlp = "TLP:CLEAR"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "c923a78e3d3da6be010578dbd7c126d1"
 
     strings:
@@ -105,8 +105,8 @@ rule VenomRAT_v36
         triage_description = "VenomRAT v3.6 dcRAT fork detected."
         yarahub_uuid = "4719b9d9-7ea5-4c2f-8dab-61620ea50f4a"
         yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:CLEAR"
-        yarahub_rule_sharing_tlp = "TLP:CLEAR"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "a1dfce8e37a7f1a4ef5c722049521352"
 
     strings:
@@ -170,8 +170,8 @@ rule AsyncRAT_057B
         triage_description = "AsyncRAT 0.5.7B .NET payload detected."
         yarahub_uuid = "2f0773d9-650c-4444-b237-0bd105d94994"
         yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:CLEAR"
-        yarahub_rule_sharing_tlp = "TLP:CLEAR"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "addb2f9bc9ffad336cbee648fdfcf138"
 
     strings:
@@ -223,8 +223,8 @@ rule XWorm_Violet_v5
         triage_description = "XWorm Violet v5 RAT detected."
         yarahub_uuid = "74ba7289-0235-4623-bae1-1a96abe95c18"
         yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:CLEAR"
-        yarahub_rule_sharing_tlp = "TLP:CLEAR"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "403f1a3b591c6da42efd290ec3094cdd"
 
     strings:
@@ -302,8 +302,8 @@ rule PureHVNC_PureCoder
         triage_description = "PureHVNC PureCoder hidden VNC RAT detected."
         yarahub_uuid = "990a9042-ede7-4cdd-ba52-35d132d301a5"
         yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:CLEAR"
-        yarahub_rule_sharing_tlp = "TLP:CLEAR"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "e2759b5ef495bfcfad9074678497f649"
 
     strings:
@@ -362,8 +362,8 @@ rule BruteRatel_C4_Loader
         triage_description = "Brute Ratel C4 loader with process injection detected."
         yarahub_uuid = "e4cd2b4f-1f41-4d71-9ecc-b4ee2ab4c422"
         yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:CLEAR"
-        yarahub_rule_sharing_tlp = "TLP:CLEAR"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "def6f8062367490a92ad6650522da0cf"
 
     strings:
