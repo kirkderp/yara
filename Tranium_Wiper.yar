@@ -16,7 +16,7 @@ rule Tranium_Wiper
 {
     meta:
         id = "5jzddCpeqgA5_Drcqh0t2w"
-        fingerprint = "2817c33002e5a7d4be63b98715f6c6aaa798ca71cdf1a00aef223bd469f9e368"
+        fingerprint = "ef4994c639633a1212037d9c0c0bc6a2d0cea62c36dd37ea6000dc850405ab8a"
         version = "1.0"
         date = "2026-03-10"
         modified = "2026-03-10"
@@ -31,6 +31,11 @@ rule Tranium_Wiper
         reference = "https://github.com/kirkderp/yara"
         triage_score = 10
         triage_description = "Tranium wiper detected. MBR overwrite, system file destruction, file encryption, and BSOD trigger."
+        yarahub_uuid = "e8be53cd-5d66-4fce-a619-2f1bc9b4aaf9"
+        yarahub_license = "CC0 1.0"
+        yarahub_rule_matching_tlp = "TLP:WHITE"
+        yarahub_rule_sharing_tlp = "TLP:WHITE"
+        yarahub_reference_md5 = "5dc62f4c65df422f1e7a0e691b1a075b"
 
     strings:
         // Ransom/wiper identity strings
