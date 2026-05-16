@@ -1,4 +1,4 @@
-# kirkderp/yara — YARA Rules from derp.ca
+# kirkderp/yara - YARA Rules from derp.ca
 
 YARA rules published alongside research on [derp.ca](https://www.derp.ca), a malware C2 tracker and threat intelligence project tracking active malware infrastructure.
 
@@ -41,4 +41,4 @@ Rules are automatically deployed to:
 
 ## About derp.ca
 
-[derp.ca](https://www.derp.ca) tracks malware C2 infrastructure, distribution hosts, and publishes technical malware analysis. Data sources include Triage, URLhaus, ThreatFox, and custom sandbox telemetry.
+[derp.ca](https://www.derp.ca) tracks malware C2 infrastructure and publishes technical malware analysis.
