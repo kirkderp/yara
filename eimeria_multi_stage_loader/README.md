@@ -22,9 +22,7 @@ Triage assigned the family label "Eimeria" to a sample it saw on May 8, 2026. Th
 
 ## Layer 1: the signed carrier and the zlib DLL that was not
 
-`dsclock.exe` is a legitimate binary (on VT since 2022, 0/70) signed by "Duality Software Co. Ltd." (Saint Petersburg, Russia) with PDB path `O:\Projects\dsclock\Release\DSClock.x86.pdb`. It is **not malicious on its own**. It legitimately imports libcurl functions.
-
-The malicious component is DLL side-loading. Both files sit in the same `jjez/` directory. When dsclock.exe runs, Windows loads `zlibwapi.dll` from the app directory first. The host binary is innocent; the import table is the attack surface.
+`dsclock.exe` has been on VT since 2022 (0/70) and shows no malicious behaviour on its own. Signed by Duality Software Co. Ltd., PDB `DSClock.x86.pdb`. The attack vector is DLL side-loading -- Windows loads `zlibwapi.dll` from the same `jjez/` directory before checking system paths.
 
 `zlibwapi.dll` exports the usual zlib and minizip entry points (deflate, inflate, compress, uncompress) but hidden in its .text section is an AES-128-CBC decryption engine with its own SBOX table (at 0xdf80, confirmed starting `63 7c 77 7b`) and RCON values (at 0xe080). Capa confirmed PE header parsing, section enumeration, CreateProcess, BCryptGenRandom, and file I/O capabilities that do not belong in a zlib wrapper.
 
