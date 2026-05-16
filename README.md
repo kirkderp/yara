@@ -39,6 +39,10 @@ Rules are automatically deployed to:
 - [Triage](https://tria.ge) (hatching.cloud)
 - This GitHub repository
 
+## License
+
+All rules in this repository are dedicated to the public domain under [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/). No attribution required, but a link back to [derp.ca](https://www.derp.ca) is appreciated.
+
 ## About derp.ca
 
 [derp.ca](https://www.derp.ca) tracks malware C2 infrastructure and publishes technical malware analysis.
