@@ -15,9 +15,7 @@ Go RAT delivered as `NursultanCracked.exe`. Three-stage loader unpacks from RCDA
 
 ## Detection
 
-The rule targets the unpacked Go payload, not the native loader. It combines the Go build marker, WebSocket path, plaintext command fragments, and support markers from the persistence/build configuration. Build-specific values are used only as support, not as the primary detection condition.
-
-The original loader encrypts the payload in its resource section, so it is not expected to match this rule.
+The rule is scoped to the recovered Go payload produced by the RCDATA 970 transform chain. It combines the Go build marker, WebSocket path, plaintext command fragments, and support markers from the persistence/build configuration. Build-specific values are used only as supporting evidence.
 
 ## References
 
