@@ -7,11 +7,22 @@
 | **Family** | eimeria (Triage-assigned) |
 | **Archive SHA256** | `c872cd101d9c2a773f08558dde7b716161cf977d4aa99c2347c0269423434f8c` |
 | **First seen** | 2026-05-08 |
-| **C2** | `ws://94.26.90.139:3006` (Dedik Services Ltd, Frankfurt, DE) |
+| **C2** | `94.26.90[.]139:3006` (Dedik Services Ltd, Frankfurt, DE) |
 | **Triage** | 10/10 -- [260508-n6jeqagv2w](https://tria.ge/260508-n6jeqagv2w) |
 | **VT** | Archive 1/74, zlibwapi.dll 4/68, dsclock.exe 0/70 |
 
-The hash surfaced through C2 feed toward `94.26.90.139:3006`, a bare IP on Dedik Services Limited in Frankfurt. The RAR5 archive contains four files under `jjez/`. Triage flagged two score-10, extracted a `ws://` C2 from memory dump. No YARA rules hit. Five-layer chain: signed carrier, zlib DLL with hidden AES, IExpress archive, AutoIt process hollowing, .NET C2 beacon.
+The hash surfaced through C2 feed toward `94.26.90[.]139:3006`, a bare IP on Dedik Services Limited in Frankfurt. The RAR5 archive contains four files under `jjez/`. Triage flagged two score-10 and extracted a WebSocket C2 from memory dump. Five-layer chain: signed carrier, zlib DLL with hidden AES, IExpress archive, AutoIt process hollowing, .NET C2 beacon.
+
+## Detection
+
+YARA rule: [Eimeria_MultiStage_Loader.yar](Eimeria_MultiStage_Loader.yar)
+
+The rule is scoped to the observed malicious loader components and has two branches:
+
+1. `zlibwapi.dll`: PE32 DLL, zlib exports, `BCryptGenRandom`, AES SBOX/RCON constants, and loader process creation import.
+2. `Deal.exe`: PE32+ AutoIt runtime with RunPE process hollowing imports.
+
+Validation matched `zlibwapi.dll` and the recovered `Deal.exe` runtime artifact. The clean signed carrier `dsclock.exe`, bundled `libcurl.dll`, encrypted `msbuilder64.dll`, submitted RAR container, and adjacent local breach corpus samples stayed clean.
 
 ## Layer 0: the RAR5 bundle
 
@@ -22,7 +33,7 @@ The hash surfaced through C2 feed toward `94.26.90.139:3006`, a bare IP on Dedik
 | msbuilder64.dll | 4,652,720 | Encrypted blob | 1 | 0/61 |
 | zlibwapi.dll | 93,696 | PE32 DLL x86 | 10 | 4/68 |
 
-## Layer 1: the signed carrier and the zlib DLL that was not
+## Layer 1: signed carrier and zlib DLL loader
 
 `dsclock.exe` has been on VT since 2022 (0/70) and shows no malicious behaviour on its own. Signed by Duality Software Co. Ltd., PDB `DSClock.x86.pdb`. The attack vector is DLL side-loading -- Windows loads `zlibwapi.dll` from the same `jjez/` directory before checking system paths.
 
@@ -76,7 +87,7 @@ The final injected payload is a 5.8 KB Mono/.NET assembly that serves as the C2 
 
 | Detail | Value |
 |---|---|
-| Endpoint | `ws://94.26.90.139:3006` |
+| Endpoint | `94.26.90[.]139:3006` |
 | Provider | Dedik Services Ltd (AS207043), Frankfurt am Main, DE |
 | VT status | 11/92 malicious |
 | Liveness | Confirmed at intake (nc -vz succeeded) |
@@ -94,7 +105,7 @@ The C2 was live on 2026-05-12 via `nc -vz`. Triage sandbox reached it but receiv
 - WebSocket C2 instead of HTTP/HTTPS
 - RAR5 initial container is uncommon for this style of loader
 
-Assessment: Custom loader/RAT chain built by someone familiar with DarkGate's methodology. Not a direct code fork.
+Assessment: custom loader/RAT chain built by someone familiar with DarkGate's methodology, with a distinct delivery chain and C2 shape.
 
 
 
@@ -113,7 +124,7 @@ Assessment: Custom loader/RAT chain built by someone familiar with DarkGate's me
 
 | Type | Value | Context |
 |---|---|---|
-| IP:Port | `94.26.90.139:3006` | C2 WebSocket endpoint |
+| IP:Port | `94.26.90[.]139:3006` | C2 WebSocket endpoint |
 | Provider | Dedik Services Ltd (AS207043) | Frankfurt am Main, Germany |
 
 ### Host
@@ -127,5 +138,3 @@ Assessment: Custom loader/RAT chain built by someone familiar with DarkGate's me
 | RC4 key | `wNDRKtWS12MEvmD4jr3ZyvqQTviBYboE5Ce` |
 | Compression | LZNT1 (ntdll!RtlDecompressBuffer, format 2) |
 | AES mode | AES-128-CBC with prepended IV |
-
-

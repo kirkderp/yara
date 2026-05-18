@@ -1,3 +1,5 @@
+import "pe"
+
 /*
     Eimeria RAT -- Multi-Stage Loader Chain YARA Rule
     Author: derp.ca
@@ -8,12 +10,11 @@
       RAR5 archive -> dsclock.exe (signed carrier) side-loads zlibwapi.dll
       -> zlibwapi.dll AES-128-CBC decrypts msbuilder64.dll
       -> decrypted IExpress archive extracts 26 encrypted blobs
-      -> Deal.exe (AutoIt) RunPE hollowing -> .NET C2 beacon ws://94.26.90.139:3006
+      -> Deal.exe (AutoIt) RunPE hollowing -> .NET C2 beacon at 94.26.90[.]139:3006
 
     Detection targets:
-      - zlibwapi.dll: AES-128-CBC SBOX + RCON + BCrypt in small PE DLL
-      - dsclock.exe: signed carrier with Duality Software Co. Ltd. cert
-      - AutoIt RunPE loader with process hollowing API calls
+      - zlibwapi.dll: zlib export table, BCryptGenRandom, AES SBOX, and RCON
+      - Deal.exe: AutoIt runtime with RunPE process hollowing imports
 
     Hashes:
         RAR5: c872cd101d9c2a773f08558dde7b716161cf977d4aa99c2347c0269423434f8c
@@ -28,18 +29,19 @@ rule Eimeria_MultiStage_Loader
         fingerprint = "a6b4c8d2e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6"
         version = "2.0"
         date = "2026-05-18"
+        modified = "2026-05-18"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
         source = "https://github.com/kirkderp/yara"
         author = "derp.ca"
-        description = "Eimeria RAT: multi-layer loader chain detection targeting zlibwapi.dll (AES+BCrypt), dsclock.exe (signed carrier Duality Software), and AutoIt RunPE loader with process hollowing API calls"
+        description = "Eimeria RAT multi-layer loader chain rule targeting malicious zlibwapi.dll export and AES evidence plus AutoIt RunPE process hollowing imports."
         category = "MALWARE"
         malware = "EIMERIA"
         malware_type = "RAT"
         mitre_att = "T1055.012"
         reference = "https://github.com/kirkderp/yara"
         triage_score = 10
-        triage_description = "Eimeria multi-stage loader family"
+        triage_description = "Eimeria multi-stage loader family."
         yarahub_uuid = "41ee8f0e-3835-46fd-b5c6-6321117ba729"
         yarahub_license = "CC0 1.0"
         yarahub_rule_matching_tlp = "TLP:WHITE"
@@ -52,15 +54,11 @@ rule Eimeria_MultiStage_Loader
         $rcon = {01 02 04 08 10 20 40 80 1b 36}
         $bcrypt_dll = "bcrypt.dll" ascii
 
-        // dsclock.exe -- signed carrier (PDB path + signer)
-        $dsclock_pdb = "DSClock.x86.pdb" ascii
-        $dsclock_signer = "Duality Software Co. Ltd." ascii
-
         // AutoIt x64 compiled executable markers
         $autoit_runtime = "AUTOIT CONSULTING LTD" ascii
         $autoit_eula = "It is a violation of the AutoIt EULA" ascii
 
-        // Process hollowing API calls (via AutoIt DllCall)
+        // Process hollowing API calls
         $api_createproc = "CreateProcess" ascii
         $api_valloc = "VirtualAllocEx" ascii
         $api_writeproc = "WriteProcessMemory" ascii
@@ -70,14 +68,28 @@ rule Eimeria_MultiStage_Loader
     condition:
         uint16(0) == 0x5A4D
         and (
-            // zlibwapi.dll: AES SBOX + RCON + BCryptGenRandom in a small DLL
-            ($aes_sbox and $rcon and $bcrypt_dll and filesize < 200KB)
+            // zlibwapi.dll: zlib export table plus hidden AES/BCrypt loader evidence
+            (
+                pe.is_dll() and
+                pe.machine == pe.MACHINE_I386 and
+                filesize > 80KB and filesize < 140KB and
+                pe.imports("bcrypt.dll", "BCryptGenRandom") and
+                pe.imports("KERNEL32.dll", "CreateProcessA") and
+                pe.exports("inflate") and pe.exports("deflate") and
+                $aes_sbox and $rcon and $bcrypt_dll
+            )
             or
-            // dsclock.exe: signed carrier PDB path + Duality Software signer
-            ($dsclock_pdb and $dsclock_signer)
-            or
-            // AutoIt RunPE loader: AutoIt x64 runtime + process hollowing API calls
-            ($autoit_runtime and $autoit_eula and
-             3 of ($api_createproc, $api_valloc, $api_writeproc, $api_resume, $api_readproc))
+            // Deal.exe: AutoIt x64 runtime with process hollowing imports
+            (
+                pe.machine == pe.MACHINE_AMD64 and
+                filesize > 900KB and filesize < 1400KB and
+                pe.imports("KERNEL32.dll", "VirtualAllocEx") and
+                pe.imports("KERNEL32.dll", "WriteProcessMemory") and
+                pe.imports("KERNEL32.dll", "ReadProcessMemory") and
+                pe.imports("KERNEL32.dll", "ResumeThread") and
+                pe.imports("KERNEL32.dll", "CreateProcessW") and
+                $autoit_runtime and $autoit_eula and
+                3 of ($api_createproc, $api_valloc, $api_writeproc, $api_resume, $api_readproc)
+            )
         )
 }
