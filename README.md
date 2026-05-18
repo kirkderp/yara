@@ -2,15 +2,6 @@
 
 YARA rules published alongside research on [derp.ca](https://www.derp.ca), a malware C2 tracker and threat intelligence project tracking active malware infrastructure.
 
-Each rule lives in its own directory with a README.md that serves as the associated research post, including full analysis, IOCs, and detection guidance.
-
-## Rules
-
-| Directory | Family | Type |
-|---|---|---|
-| [vidar_v1_5_go](vidar_v1_5_go/) | Vidar v1.5 | Go-based infostealer |
-| [eimeria_multi_stage_loader](eimeria_multi_stage_loader/) | Eimeria | Five-layer loader chain (RAR5 -> RunPE) |
-
 ## Rule Format
 
 All rules follow the CCCS YARA validator standard and include YARAhub-compatible metadata:
