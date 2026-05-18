@@ -21,7 +21,7 @@ The rule targets the unpacked Go payload with three condition branches:
 - Build ID + persistence task name + Go runtime
 - Build ID + mutex name + CrystalX-specific marker
 
-The original loader does not contain these plaintext strings (pay loaded is encrypted in resource section).
+The original loader encrypts the payload in its resource section, so it does not contain these plaintext strings.
 
 ## References
 
