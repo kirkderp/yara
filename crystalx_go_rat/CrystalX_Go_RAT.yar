@@ -1,13 +1,20 @@
 import "pe"
 
 /*
-    CrystalX Go RAT
+    CrystalX Go RAT -- Loader + Go Payload YARA Rule
     Author: derp.ca
     Date: 2026-05-18
     Source: https://github.com/kirkderp/yara
 
-    Matches the submitted loader and the recovered Go payload from the
-    RCDATA 970 transform chain.
+    Go RAT delivered through a native PE64 loader. Resource 970 unwraps
+    through position-dependent XOR, ChaCha20, and raw DEFLATE into a Go
+    payload with AES-GCM string obfuscation and TLS WebSocket C2.
+
+    Detection targets:
+      - Submitted loader: large RCDATA 970 payload, resource-loading imports,
+        PE mapping imports, and loader PE-check code marker
+      - Unpacked payload: Go build marker, WebSocket path, command fragments,
+        build ID, scheduled-task prefix, and AES-GCM string key
 
     Hashes:
         Loader: 34b84db8f10d34f711bb242b21bdf662ee489dcd0e9c23b9cc95240d324bb094
@@ -20,12 +27,12 @@ rule CrystalX_Go_RAT
         id = "a7b3d5e1c8f4b2e6a9d0c3f7a1b4e8d2c5f9a0b3e7d1c4f8a2b5e9d0c6f3a7"
         version = "1.2"
         date = "2026-05-18"
+        modified = "2026-05-18"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
         source = "https://github.com/kirkderp/yara"
         author = "derp.ca"
-        yarahub_uuid = "9b56434e-3bd2-4dfa-80bf-4d7f59c552f9"
-        description = "CrystalX Go RAT loader and unpacked payload rule"
+        description = "CrystalX Go RAT loader and unpacked payload rule targeting RCDATA 970 loader structure, WebSocket C2 markers, command fragments, and build artifacts"
         category = "MALWARE"
         malware = "CRYSTALX"
         malware_type = "RAT"
@@ -33,6 +40,7 @@ rule CrystalX_Go_RAT
         reference = "https://github.com/kirkderp/yara"
         triage_score = 10
         triage_description = "CrystalX Go RAT loader with large RCDATA payload and unpacked Go payload command markers."
+        yarahub_uuid = "9b56434e-3bd2-4dfa-80bf-4d7f59c552f9"
         yarahub_license = "CC0 1.0"
         yarahub_rule_matching_tlp = "TLP:WHITE"
         yarahub_rule_sharing_tlp = "TLP:WHITE"
