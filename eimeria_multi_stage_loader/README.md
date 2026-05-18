@@ -1,15 +1,17 @@
-# Eimeria: the five-layer RAR5-to-RunPE malware chain
+# Eimeria: five-layer RAR5-to-RunPE loader chain
 
 **YARA Rule**: [Eimeria_MultiStage_Loader.yar](Eimeria_MultiStage_Loader.yar)
 
-**Family label**: eimeria (Triage-assigned)
-**Archive SHA256**: `c872cd101d9c2a773f08558dde7b716161cf977d4aa99c2347c0269423434f8c`
-**First seen**: 2026-05-08
-**C2**: `ws://94.26.90.139:3006` (Dedik Services Ltd, Frankfurt, DE)
-**Triage**: 10/10 -- [260508-n6jeqagv2w](https://tria.ge/260508-n6jeqagv2w)
-**VT**: 1/74 (archive), zlibwapi.dll 4/68, dsclock.exe 0/70
+| | |
+|---|---|
+| **Family** | eimeria (Triage-assigned) |
+| **Archive SHA256** | `c872cd101d9c2a773f08558dde7b716161cf977d4aa99c2347c0269423434f8c` |
+| **First seen** | 2026-05-08 |
+| **C2** | `ws://94.26.90.139:3006` (Dedik Services Ltd, Frankfurt, DE) |
+| **Triage** | 10/10 -- [260508-n6jeqagv2w](https://tria.ge/260508-n6jeqagv2w) |
+| **VT** | Archive 1/74, zlibwapi.dll 4/68, dsclock.exe 0/70 |
 
-Triage assigned the family label "Eimeria" to a sample it saw on May 8, 2026. The hash surfaced through our C2 feed toward `94.26.90.139:3006`, a bare IP running on a Dedik Services Limited box in Frankfurt. The archive itself is a RAR5 containing four files under a `jjez/` directory. Triage flagged two of them as score 10 and extracted a `ws://` C2 endpoint from a memory dump. No YARA rules hit. When we dug in, what looked like a simple RAT turned into a five-layer chain: signed carrier, zlib DLL with hidden AES, IExpress self-extracting archive, AutoIt process hollowing, and a final .NET C2 beacon.
+The hash surfaced through C2 feed toward `94.26.90.139:3006`, a bare IP on Dedik Services Limited in Frankfurt. The RAR5 archive contains four files under `jjez/`. Triage flagged two score-10, extracted a `ws://` C2 from memory dump. No YARA rules hit. Five-layer chain: signed carrier, zlib DLL with hidden AES, IExpress archive, AutoIt process hollowing, .NET C2 beacon.
 
 ## Layer 0: the RAR5 bundle
 
@@ -94,20 +96,7 @@ The C2 was live on 2026-05-12 via `nc -vz`. Triage sandbox reached it but receiv
 
 Assessment: Custom loader/RAT chain built by someone familiar with DarkGate's methodology. Not a direct code fork.
 
-## Detection
 
-All YARA rules are available at [github.com/kirkderp/yara](https://github.com/kirkderp/yara).
-
-The Eimeria rule [Eimeria_MultiStage_Loader.yar](Eimeria_MultiStage_Loader.yar) targets multiple layers of the chain with six condition branches:
-
-- zlib DLL variant: zlib exports + AES SBOX + RCON + BCryptGenRandom
-- dsclock variant: PDB path + Duality Software signer
-- IExpress variant: SED marker + makecab.exe
-- IExpress self-extractor: SED marker + file size range
-- AutoIt Eimeria script: Material/ReportFootballHost config + RC4/LZNT1 functions
-- AutoIt Eimeria executable: runtime markers + Eimeria configuration
-
-Custom rules are also deployed to [YARAify](https://yaraify.abuse.ch/) and [Triage](https://tria.ge).
 
 ### Hashes
 
@@ -139,29 +128,4 @@ Custom rules are also deployed to [YARAify](https://yaraify.abuse.ch/) and [Tria
 | Compression | LZNT1 (ntdll!RtlDecompressBuffer, format 2) |
 | AES mode | AES-128-CBC with prepended IV |
 
-### YARA Rule Metadata
 
-```
-rule Eimeria_MultiStage_Loader
-{
-    meta:
-        id = "..."
-        version = "1.0"
-        date = "2026-05-16"
-        status = "RELEASED"
-        sharing = "TLP:CLEAR"
-        author = "derp.ca"
-        category = "MALWARE"
-        malware = "EIMERIA"
-        malware_type = "RAT"
-        mitre_att = "T1055.012"
-        triage_score = 10
-        yarahub_license = "CC0 1.0"
-        yarahub_rule_matching_tlp = "TLP:WHITE"
-        yarahub_rule_sharing_tlp = "TLP:WHITE"
-}
-```
-
----
-
-If you operate a threat intelligence platform with sample access or have seen similar delivery chains, reach out. Additional sample visibility directly sharpens the tracking.
