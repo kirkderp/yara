@@ -1,3 +1,5 @@
+import "pe"
+
 /*
     Vidar v1.5 Go-based Infostealer YARA Rule
     Author: derp.ca
@@ -26,9 +28,9 @@ rule Vidar_v1_5_Go
         modified = "2026-05-16"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
-        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
+        source = "https://github.com/kirkderp/yara"
         author = "derp.ca"
-        description = "Vidar v1.5 Go-based infostealer with 12-category sandbox scoring, dead-drop C2 via Telegram/Steam, multipart form-data exfil, and process injection"
+        description = "Vidar v1.5 Go-based infostealer with 12-category sandbox scoring, Telegram and Steam dead-drop C2, multipart form-data exfil, and process injection."
         category = "MALWARE"
         malware = "VIDAR"
         malware_type = "INFOSTEALER"
@@ -117,6 +119,7 @@ rule Vidar_v1_5_Go
 
     condition:
         uint16(0) == 0x5A4D
+        and pe.machine == pe.MACHINE_AMD64
         and filesize > 5MB and filesize < 10MB
         and (
             // On-disk: Go build ID + Go version + DLL name pattern

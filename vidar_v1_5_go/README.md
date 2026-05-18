@@ -1,4 +1,4 @@
-# Vidar v1.5 in Go: same family, new language, heavy sandbox checks
+# Vidar v1.5 in Go: dead drops and sandbox scoring
 
 **YARA Rule**: [Vidar_v1_5_Go.yar](Vidar_v1_5_Go.yar)
 
@@ -15,11 +15,11 @@
 | Botnet ID | `702ef1b4007f07887e9faaee0667b50b` |
 | Version | 1.5 |
 
-Vidar is a name most infostealer trackers know well -- an Arkei descendant that has been snatching browser credentials and crypto wallets since 2018. It usually ships as a .NET binary or a C++ PE. The v1.5 sample we pulled from Triage on May 13, 2026 is neither. It is a 7 MB Go 1.25.4 native PE with a twelve-category sandbox scoring system, dead-drop C2 via Telegram and Steam profile pages, and enough crypto primitives to make a librarian blush.
+Vidar is an Arkei-descended infostealer that has tracked across .NET, C++, and Go builds. The v1.5 sample pulled from Triage on May 13, 2026 is a 7 MB Go 1.25.4 native PE with a twelve-category sandbox scoring system, dead-drop C2 via Telegram and Steam profile pages, and multipart exfiltration.
 
 Previous coverage of Go-based Vidar builds (Datadog's MUT-4831, Malwarebytes March 2026) established the Telegram/Steam C2 discovery pattern. Our sample follows the same strategy but belongs to a separate build track: unique botnet ID, separate C2 IP at a Hetzner box in Finland, and its own Telegram handle and Steam profile.
 
-## Not your father's .NET stealer
+## Go implementation markers
 
 Capa identified a collection of crypto primitives that go beyond what a typical Vidar build needs for config decryption alone:
 
@@ -75,8 +75,8 @@ Rbin emulation (125 seconds, 59 million instructions, 2,437 API calls) confirmed
 **Dead drop URLs**: Telegram and Steam profile pages that serve as a dead-drop resolver for active C2 address publication.
 
 Dead drops:
-- `https://telegram.me/hgo9tx`
-- `https://steamcommunity.com/profiles/76561198707628078`
+- `hxxps://telegram[.]me/hgo9tx`
+- `hxxps://steamcommunity[.]com/profiles/76561198707628078`
 
 Two User-Agent strings:
 - `Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0` (dead drops)
@@ -91,8 +91,8 @@ version: 1.5
 family: vidar
 botnet: 702ef1b4007f07887e9faaee0667b50b
 c2:
-  - https://telegram.me/hgo9tx
-  - https://steamcommunity.com/profiles/76561198707628078
+  - hxxps://telegram[.]me/hgo9tx
+  - hxxps://steamcommunity[.]com/profiles/76561198707628078
 user_agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0
 ```
 
@@ -101,6 +101,10 @@ user_agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/201001
 YARA rule: [Vidar_v1_5_Go.yar](Vidar_v1_5_Go.yar)
 
 Full writeup: [derp.ca/research/vidar-go-sandbox-dead-drop/](https://www.derp.ca/research/vidar-go-sandbox-dead-drop/)
+
+The rule is scoped to the observed Vidar v1.5 Go build. It requires a PE32+ x64 binary and combines Go/runtime markers, sandbox scoring strings, dead-drop/exfil fields, botnet ID, and AV process enumeration branches.
+
+Validation matched the submitted Vidar binary. Adjacent local breach corpus samples stayed clean.
 
 ## IOC summary
 
@@ -117,8 +121,8 @@ Full writeup: [derp.ca/research/vidar-go-sandbox-dead-drop/](https://www.derp.ca
 | Type | Value | Context |
 |---|---|---|
 | IP | `135.181.237.59:443` | Vidar C2 (Hetzner, Finland) |
-| URL | `https://telegram.me/hgo9tx` | Dead drop resolver |
-| URL | `https://steamcommunity.com/profiles/76561198707628078` | Dead drop resolver |
+| URL | `hxxps://telegram[.]me/hgo9tx` | Dead drop resolver |
+| URL | `hxxps://steamcommunity[.]com/profiles/76561198707628078` | Dead drop resolver |
 
 ### Behavioural
 
@@ -133,4 +137,4 @@ Full writeup: [derp.ca/research/vidar-go-sandbox-dead-drop/](https://www.derp.ca
 
 ---
 
-If you operate a threat intelligence platform or run Triage infrastructure and can share data, reach out. Additional sample visibility directly sharpens the tracking.
+Additional samples sharing the botnet ID, dead-drop pattern, or sandbox scoring strings are useful clustering points for this rule.
