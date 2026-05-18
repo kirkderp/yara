@@ -15,7 +15,7 @@ Go RAT delivered as `NursultanCracked.exe`. Three-stage loader unpacks from RCDA
 
 ## Detection
 
-The rule is scoped to the recovered Go payload produced by the RCDATA 970 transform chain. It combines the Go build marker, WebSocket path, plaintext command fragments, and support markers from the persistence/build configuration. Build-specific values are used only as supporting evidence.
+The rule matches the submitted loader and the recovered Go payload. The loader branch keys on the PE64 resource-loading stub, resource ID `970`, the large RCDATA payload, and the import set used to load and map the embedded payload. The payload branch keys on the Go build marker, WebSocket path, command fragments, and persistence/build markers.
 
 ## References
 
