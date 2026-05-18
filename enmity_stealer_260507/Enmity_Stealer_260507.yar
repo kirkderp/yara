@@ -1,11 +1,13 @@
+import "pe"
+
 /*
     Enmity Stealer -- Credential/Cryptocurrency/Discord Theft YARA Rule
     Author: derp.ca
     Date: 2026-05-18
     Source: https://github.com/kirkderp/yara
 
-    C2: ws://futuregroupstar.lat:3000
-    Exfil: Discord webhook at discord.com/api/webhooks/1493441198361153547
+    C2: futuregroupstar[.]lat:3000
+    Exfil: Discord webhook at discord[.]com/api/webhooks/1493441198361153547
     Target: credentials, cookies, crypto wallets, Discord tokens, certificates
     Browser targets: Chrome, Firefox, Opera, Brave, Edge, Yandex, Vivaldi
     Wallet targets: Exodus, Electrum, Wasabi, AtomicWallet, Coinomi, TrustWallet, Monero
@@ -27,16 +29,16 @@ rule Enmity_Stealer_260507
         modified = "2026-05-18"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
-        source = "HTTPS://GITHUB.COM/KIRKDERP/YARA"
+        source = "https://github.com/kirkderp/yara"
         author = "derp.ca"
-        description = "Enmity stealer -- credential, cryptocurrency wallet, and Discord token theft with WS C2 and Discord webhook exfil"
+        description = "Enmity stealer rule targeting WebSocket C2, Discord webhook exfil, embedded Discord token JavaScript, browser credential SQL, wallet paths, and certificate theft imports."
         category = "MALWARE"
         malware = "ENMITY"
         malware_type = "STEALER"
         mitre_att = "T1055.012|T1555.003|T1115|T1056.001"
         reference = "https://github.com/kirkderp/yara"
         triage_score = 10
-        triage_description = "Enmity stealer detected -- credential theft from 7 browsers, cryptocurrency wallets (7+), Discord token grabber via embedded JS, certificate theft, clipboard monitoring, and keylogging"
+        triage_description = "Enmity stealer credential, wallet, Discord token, certificate, clipboard, and keylogging rule."
         yarahub_uuid = "83485cf8-0e48-48a2-bcca-01dbe4df76c1"
         yarahub_license = "CC0 1.0"
         yarahub_rule_matching_tlp = "TLP:WHITE"
@@ -61,10 +63,25 @@ rule Enmity_Stealer_260507
         $s_wallet_monero = "\\Monero\\wallets" ascii
 
     condition:
-        (all of ($s_ws_c2, $s_pdb, $s_webhook_path))
-        or (
-            all of ($s_js_*) and
-            2 of ($s_wallet_*) and
-            1 of ($s_sql_*)
+        uint16(0) == 0x5A4D and
+        pe.machine == pe.MACHINE_AMD64 and
+        filesize > 8MB and filesize < 10MB and
+        (
+            (
+                all of ($s_ws_c2, $s_pdb, $s_webhook_path) and
+                pe.imports("CRYPT32.dll", "PFXImportCertStore") and
+                pe.imports("USER32.dll", "GetAsyncKeyState")
+            )
+            or
+            (
+                all of ($s_js_*) and
+                2 of ($s_wallet_*) and
+                1 of ($s_sql_*) and
+                pe.imports("CRYPT32.dll", "CertOpenStore") and
+                pe.imports("CRYPT32.dll", "CertEnumCertificatesInStore") and
+                pe.imports("USER32.dll", "GetClipboardData") and
+                pe.imports("KERNEL32.dll", "CreateToolhelp32Snapshot") and
+                2 of ($s_wallet_*)
+            )
         )
 }

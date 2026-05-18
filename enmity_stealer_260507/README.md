@@ -1,4 +1,4 @@
-# Enmity Stealer: credential theft from 7 browsers, 8 wallets, and your Discord token
+# Enmity Stealer: browser, wallet, and Discord theft
 
 **YARA Rule**: [Enmity_Stealer_260507.yar](Enmity_Stealer_260507.yar)
 
@@ -11,7 +11,7 @@
 | Triage | 10/10 (enmity) |
 | Submitted | 2026-05-07 |
 | Family rule | Enmity_Stealer_260507 |
-| C2 | `ws://futuregroupstar.lat:3000` |
+| C2 | `futuregroupstar[.]lat:3000` |
 | Exfil | Discord webhook |
 
 Triage assigned the family label "Enmity" to a sample it saw on May 7, 2026. The static engine extracted a Discord webhook and WebSocket C2 endpoint, and Triage's built-in signatures flagged the binary for browser references, wallet extension IDs, Discord URLs, and credential-store SQL queries. Dynamic execution was less productive -- both sandbox runs scored 1 and showed no C2 contact.
@@ -72,11 +72,11 @@ function getUserInfo(token, callback) {
         callback(userCache[token]);
         return;
     }
-    // GET discord.com/api/v10/users/@me with Authorization header
+    // GET discord[.]com/api/v10/users/@me with Authorization header
 }
 ```
 
-The webhook URL is hardcoded in the JS context for direct exfiltration.
+The webhook path is hardcoded in the JS context for direct exfiltration.
 
 ### Certificate theft
 
@@ -108,11 +108,11 @@ The binary imports D3D11, D3DX9, D3DX11, and D3DCompiler -- likely for rendering
 
 | Detail | Value |
 |---|---|
-| WebSocket C2 | `ws://futuregroupstar.lat:3000` |
-| Discord webhook | `https://discord.com/api/webhooks/1493441198361153547/LOz3gDlrs_vBJI_Lp8X5EM7w-kDqeFhbkWBM9NJSSCbnu_P37n3e0Mza2DZu97WaNnsL` |
+| WebSocket C2 | `futuregroupstar[.]lat:3000` |
+| Discord webhook | `hxxps://discord[.]com/api/webhooks/1493441198361153547/...` |
 | User-Agent | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36` |
 
-Both C2 endpoints were extracted by Triage's static config analysis and confirmed locally. The WebSocket C2 domain (`futuregroupstar.lat`) did not resolve at analysis time (2026-05-18) and the webhook path was not probed.
+Both C2 endpoints were extracted by Triage's static config analysis and confirmed locally. The WebSocket C2 domain (`futuregroupstar[.]lat`) did not resolve at analysis time (2026-05-18) and the webhook path was not probed.
 
 ## Developer signature
 
@@ -129,10 +129,12 @@ YARA rule: [Enmity_Stealer_260507.yar](Enmity_Stealer_260507.yar)
 
 Custom rules are deployed to [YARAify](https://yaraify.abuse.ch/) and [Triage](https://tria.ge).
 
-The YARA rule uses two-tier logic:
+The YARA rule uses two-tier logic, both guarded by PE32+ x64 size bounds and imported capability evidence:
 
-1. **Hard signature**: C2 string (`ws://futuregroupstar.lat:3000`) + PDB path (`Iago Aquino Mendes...`) + full Discord webhook path = definitive for this exact variant.
-2. **Module structure**: Discord JS grabber functions (`cachedToken` + `getUserInfo` + `userCache` + `const webhook = '`) + any 2 wallet paths + 1 SQL query = variant detection (maintains detection if C2 strings are swapped but module structure remains).
+1. **Submitted variant branch**: C2 string, PDB path (`Iago Aquino Mendes...`), full Discord webhook path, certificate theft import, and keylogging import.
+2. **Stealer module branch**: Discord JS grabber functions (`cachedToken` + `getUserInfo` + `userCache` + `const webhook = '`), wallet paths, browser credential SQL, certificate-store imports, clipboard import, and process enumeration import.
+
+Validation matched the submitted Enmity binary. Adjacent local breach corpus samples stayed clean.
 
 ## IOC summary
 
@@ -148,8 +150,8 @@ The YARA rule uses two-tier logic:
 
 | Type | Value | Context |
 |---|---|---|
-| Domain | `futuregroupstar.lat:3000` | WebSocket C2 |
-| URL | `https://discord.com/api/webhooks/1493441198361153547/...` | Exfil webhook |
+| Domain | `futuregroupstar[.]lat:3000` | WebSocket C2 |
+| URL | `hxxps://discord[.]com/api/webhooks/1493441198361153547/...` | Exfil webhook |
 
 ### Files written at runtime
 
@@ -198,4 +200,4 @@ rule Enmity_Stealer_260507
 
 ---
 
-If you operate a threat intelligence platform with sample access or have seen variants sharing the PDB path or wallet/browser target list, reach out.
+Additional samples sharing the PDB path or wallet/browser target list are useful clustering points for this rule.
