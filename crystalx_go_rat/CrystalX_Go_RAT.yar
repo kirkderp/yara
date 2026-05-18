@@ -1,13 +1,12 @@
 /*
-    CrystalX Go RAT -- Loader + Go Payload YARA Rule
+    CrystalX Go RAT -- unpacked Go payload hunting rule
     Author: derp.ca
     Date: 2026-05-18
     Source: https://github.com/kirkderp/yara
 
-    CrystalX Go RAT delivered as NursultanCracked.exe. Three-stage loader
-    unpacks Go payload from RCDATA 970 (XOR -> ChaCha20 -> DEFLATE).
-    Go payload uses AES-GCM string obfuscation, TLS websocket C2 at
-    wss://crystalxrat.net/api/ws, build ID YBFZUW1U32T.
+    Targets the unpacked Go payload layer. The native loader keeps most
+    payload content encrypted in RCDATA 970, so this rule is not expected to
+    match the outer loader.
 
     Hashes:
         Loader: 34b84db8f10d34f711bb242b21bdf662ee489dcd0e9c23b9cc95240d324bb094
@@ -18,51 +17,62 @@ rule CrystalX_Go_RAT
 {
     meta:
         id = "a7b3d5e1c8f4b2e6a9d0c3f7a1b4e8d2c5f9a0b3e7d1c4f8a2b5e9d0c6f3a7"
-        version = "1.0"
+        version = "1.1"
         date = "2026-05-18"
         status = "RELEASED"
         sharing = "TLP:CLEAR"
         source = "https://github.com/kirkderp/yara"
         author = "derp.ca"
         yarahub_uuid = "9b56434e-3bd2-4dfa-80bf-4d7f59c552f9"
-        description = "CrystalX Go RAT: unpacked Go payload with build ID YBFZUW1U32T, AES-GCM key, and Go WebSocket C2 infrastructure"
+        description = "Provisional hunting rule for unpacked CrystalX Go RAT payloads using Go, WebSocket path, command, and persistence markers"
         category = "MALWARE"
         malware = "CRYSTALX"
         malware_type = "RAT"
         mitre_att = "T1055.012"
         reference = "https://github.com/kirkderp/yara"
         triage_score = 10
-        triage_description = "CrystalX Go RAT with websocket C2, AES-GCM obfuscation, and browser credential theft"
+        triage_description = "Unpacked CrystalX Go RAT payload with websocket C2 path, remote desktop/file-manager command fragments, and persistence markers"
+        scope = "unpacked Go payload"
+        confidence = "medium"
+        false_positives = "Low confidence until tested against additional CrystalX builds; intended as a hunting rule"
         yarahub_license = "CC0 1.0"
         yarahub_rule_matching_tlp = "TLP:WHITE"
         yarahub_rule_sharing_tlp = "TLP:WHITE"
         yarahub_reference_md5 = "1fc32ba003f385deca86e5ccf8d6ae43"
 
     strings:
-        // CrystalX build ID
-        $build_id = "YBFZUW1U32T" ascii
+        // Payload/runtime layer
+        $go_build = "Go buildinf:" ascii
+        $proto_ws_path = "/api/ws" ascii
 
-        // AES-GCM string decryption key
-        $aes_key = "Hk4fOCLbqKFbbAxwyAcFKUKXK4iqVaMD" ascii
+        // Remote desktop / interaction command fragments present in the unpacked PE
+        $cmd_rd_start = "rd_start" ascii
+        $cmd_rd_block = "rd_block" ascii
+        $cmd_rd_input = "rd_input" ascii
+        $cmd_rd_list = "rd_list_" ascii
+        $cmd_webcam_start = "webcam_s" ascii
+        $cmd_webcam_list = "webcam_l" ascii
 
-        // CrystalX-specific persistence/config strings
-        $persist_task = "NvContainerTask_YBFZUW1U32" ascii
-        $mutex_name = "WinSecMutex_YBFZUW1U32" ascii
-        $wc_elv = "WC_ELV" ascii
+        // File manager / collection command fragments present in the unpacked PE
+        $cmd_fm_drive = "fm:drive" ascii
+        $cmd_fm_ls = "fm:ls:" ascii
+        $cmd_fm_del = "fm:del:" ascii
+        $cmd_clipboard_set = "clipboard:set:" ascii
+        $cmd_steal_manual = "steal:manual" ascii
+        $cmd_software_uninstall = "software:uninstall:" ascii
 
-        // Go runtime markers (identifies Go-compiled PE)
-        $go_runtime = "Go buildinf:" ascii
+        // Support markers. These help confidence but should not carry the rule alone.
+        $support_task_prefix = "NvContainerTask_" ascii
+        $support_build_id = "YBFZUW1U32T" ascii
+        $support_string_key = "Hk4fOCLbqKFbbAxwyAcFKUKXK4iqVaMD" ascii
+        $support_wc_elv = "WC_ELV" ascii
+        $support_geo = "ip-api.com" ascii
 
     condition:
-        uint16(0) == 0x5A4D
-        and (
-            // Unpacked Go payload: build ID + AES key + Go runtime
-            ($build_id and $aes_key and $go_runtime)
-            or
-            // Unpacked Go payload: build ID + persistence + Go runtime
-            ($build_id and $persist_task and $go_runtime)
-            or
-            // Unpacked Go payload: build ID + mutex + WC_ELV
-            ($build_id and $mutex_name and $wc_elv)
-        )
+        uint16(0) == 0x5a4d and
+        filesize > 4MB and filesize < 20MB and
+        $go_build and
+        $proto_ws_path and
+        5 of ($cmd_*) and
+        1 of ($support_*)
 }
