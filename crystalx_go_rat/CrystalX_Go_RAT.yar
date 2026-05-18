@@ -24,6 +24,7 @@ rule CrystalX_Go_RAT
         sharing = "TLP:CLEAR"
         source = "https://github.com/kirkderp/yara"
         author = "derp.ca"
+        yarahub_uuid = "9b56434e-3bd2-4dfa-80bf-4d7f59c552f9"
         description = "CrystalX Go RAT: unpacked Go payload with build ID YBFZUW1U32T, AES-GCM key, and Go WebSocket C2 infrastructure"
         category = "MALWARE"
         malware = "CRYSTALX"
@@ -35,6 +36,7 @@ rule CrystalX_Go_RAT
         yarahub_license = "CC0 1.0"
         yarahub_rule_matching_tlp = "TLP:WHITE"
         yarahub_rule_sharing_tlp = "TLP:WHITE"
+        yarahub_reference_md5 = "1fc32ba003f385deca86e5ccf8d6ae43"
 
     strings:
         // CrystalX build ID
