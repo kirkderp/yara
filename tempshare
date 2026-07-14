@@ -18,7 +18,7 @@ The chain nests several more stages. The `Stream.Toolkit.dat` shellcode parses `
 
 The final DLL supports browser-store collection and protected outbound transfer, resumable file upload and download, process inventory and termination, shell commands, SOCKS bridging, remote-desktop control, service setup, keylogging, desktop/video capture, and remote-process manipulation. It also contains private-key-capable PFX export code with no mapped activation path.
 
-The script appeared at the top of HTML on multiple pages of the subdomain. That placement points to a shared template, CMS or theme layer, plugin, tag manager, edge worker, CDN rule, or publishing pipeline upstream of individual posts.
+The affected subdomain runs WordPress. The same script appeared at the top of the HTML across multiple pages, indicating a sitewide injection. Its consistent placement fits a shared WordPress component such as the active theme, a plugin, or code attached to an early rendering hook.
 
 ## High-level chain
 
@@ -84,7 +84,7 @@ Observed RPC endpoints embedded in the loader:
 
 - `hxxps://polygon.gateway.tenderly[.]co`
 - `hxxps://polygon.drpc[.]org`
-- `hxxps://rpc-mainnet.matic.quiknode.pro`
+- `hxxps://rpc-mainnet.matic.quiknode[.]pro`
 - `hxxps://1rpc[.]io/matic`
 - `hxxps://polygon-public.nodies[.]app`
 - `hxxps://rpc.ankr[.]com/polygon`
@@ -745,7 +745,7 @@ The final decoded DLL contains a separate native C2 system beyond the earlier `a
 | C2 component | Summary |
 |---|---|
 | Endpoint families | Scheduler `0x00b2dd00` rotates a remotely mutable four-slot direct `(IPv4, port)` table at state `+0x92d`, four `.onion:443` records over local SOCKS/Tor after fallback activation, and four generated direct IPv4/TCP-443 fallbacks. A successful `0x119`-byte connection record is cached at `+0x5a4`. |
-| Direct fallback endpoints | `45.151.74[.]119:443`, `109.172.95[.]184:443`, `151.236.4[.]135:443`, and `62.60.156[.]11:443`, derived by `0x0054f950` after subtractor `0x43` is initialized by `0x0054f7d0`. |
+| Direct fallback endpoints | `45[.]151[.]74[.]119:443`, `109[.]172[.]95[.]184:443`, `151[.]236[.]4[.]135:443`, and `62[.]60[.]156[.]11:443`, derived by `0x0054f950` after subtractor `0x43` is initialized by `0x0054f7d0`. |
 | Tor fallback | A non-32-byte response to `0xfd0 / 1` becomes encrypted event type `9`. Worker `0x00b29780` retrieves and decrypts it, manually maps the module, resolves `tor_main`, seeds four `.onion` records through `0x0054fa00`, and exposes local SOCKS on state `+0x1388` (default `0x235a`). |
 | Transport | Connection records select direct IPv4 TCP through `0x00b2a380` or domain-over-local-SOCKS5 through `0x00b29f10`. The hidden-desktop subsystem receives a separate C2-selected IPv4/port pair from offsets `+0x77/+0x7b` of an `0x800 / 6` response record. |
 | Session and framing | `0x00b2bd00` performs handshake `0x00b278e0`, sends fixed `0x1c7`-byte request headers through `0x00b28fc0`, and receives bounded objects through `0x00b29240` with maximum `0x10000000`. Headers carry 32-byte host/session material from state `+0x90c` and a 255-byte global block. |
@@ -1532,10 +1532,10 @@ Payload-delivery and C2 network indicators:
 - `auth-code-check[.]info/<16-hex-ray>?_=1`
 - `auth-code-check[.]info/<64-hex-archive-token>`
 - `auth-code-check[.]info/p/<64-hex-archive-token>`
-- `45.151.74[.]119:443` (decoded PE generated direct candidate)
-- `109.172.95[.]184:443` (decoded PE generated direct candidate)
-- `151.236.4[.]135:443` (decoded PE generated direct candidate)
-- `62.60.156[.]11:443` (decoded PE generated direct candidate)
+- `45[.]151[.]74[.]119:443` (decoded PE generated direct candidate)
+- `109[.]172[.]95[.]184:443` (decoded PE generated direct candidate)
+- `151[.]236[.]4[.]135:443` (decoded PE generated direct candidate)
+- `62[.]60[.]156[.]11:443` (decoded PE generated direct candidate)
 - `aqpfkxxtvahlzr6vobt6fhj4riev7wxzoxwltbcysuybirygxzvp23ad[.]onion:443` (decoded PE SOCKS/Tor candidate)
 - `t77e4phezpwqebpbhdagr26ewkfaxytscimhxofws4wcisjo4wundead[.]onion:443` (decoded PE SOCKS/Tor candidate)
 - `vsjyfpt7vcd6atniefmz36ikxrqk5eyv573a2af4e2ntb437wdch63yd[.]onion:443` (decoded PE SOCKS/Tor candidate)
